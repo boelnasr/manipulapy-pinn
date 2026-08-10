@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# training artifacts
+runs/
+checkpoints/
+*.pt
+*.pth
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
