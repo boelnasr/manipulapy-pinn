@@ -33,7 +33,7 @@ def main():
     parser.add_argument("--robot", default="panda")
     parser.add_argument("--iterations", type=int, default=600)
     parser.add_argument("--width", type=int, default=128, help="units per hidden layer")
-    parser.add_argument("--depth", type=int, default=3,
+    parser.add_argument("--depth", type=int, default=5,
                         help="number of hidden layers; >4 switches to residual blocks")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()

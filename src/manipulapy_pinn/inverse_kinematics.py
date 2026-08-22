@@ -35,7 +35,7 @@ from .robots import RobotModel
 class InverseKinematicsPINN(torch.nn.Module):
     """q = h_θ(target end-effector position)."""
 
-    def __init__(self, n_joints: int, hidden=(128, 128, 128)):
+    def __init__(self, n_joints: int, hidden=(128,) * 5):
         super().__init__()
         self.n_joints = n_joints
         self.net = build_mlp(3, n_joints, hidden=hidden)
@@ -60,7 +60,18 @@ def train(
     batch_size: int = 32,
     lr: float = 1e-3,
     n_val: int = 64,
-    hidden=(128, 128, 128),
+    # Five layers, which build_mlp turns into residual blocks. Measured on panda
+    # at 1500 iterations, two seeds per depth so the run-to-run spread is visible
+    # alongside the effect -- mean held-out reach error:
+    #
+    #   depth 3   56.5 / 58.3 mm   -> 57.4
+    #   depth 5   34.2 / 41.4 mm   -> 37.8   <- best
+    #   depth 8   73.7 / 61.6 mm   -> 67.7
+    #
+    # The separation is larger than the spread: the worst depth-5 run still beats
+    # the best depth-3 run. Depth 8 is worse than depth 3, matching what forward
+    # dynamics shows -- residual blocks make depth usable, not free.
+    hidden=(128,) * 5,
     seed: int = 0,
     log_every: int = 100,
     verbose: bool = True,
