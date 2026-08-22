@@ -19,6 +19,9 @@ import numpy as np
 
 from manipulapy_pinn import load_robot
 from manipulapy_pinn.forward_dynamics import train as train_dynamics
+from manipulapy_pinn.metrics import format_metrics, trajectory_metrics
+from manipulapy_pinn.models import hidden_sizes
+from manipulapy_pinn.report import report_path, review_trajectory, training_report, write_report
 from manipulapy_pinn.trajectory import solve
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "runs"
@@ -31,6 +34,11 @@ def main():
     parser.add_argument("--dynamics-samples", type=int, default=2000)
     parser.add_argument("--trajectory-iterations", type=int, default=800)
     parser.add_argument("--collocation-points", type=int, default=24)
+    parser.add_argument("--dynamics-width", type=int, default=128)
+    parser.add_argument("--dynamics-depth", type=int, default=3)
+    parser.add_argument("--trajectory-width", type=int, default=64)
+    parser.add_argument("--trajectory-depth", type=int, default=2,
+                        help="hidden layers in q(t) and tau(t); >4 switches to residual blocks")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
@@ -40,7 +48,8 @@ def main():
 
     print("\n== Step 1/2: forward-dynamics surrogate ==")
     dyn_result = train_dynamics(
-        robot, n_samples=args.dynamics_samples, iterations=args.dynamics_iterations, seed=args.seed,
+        robot, n_samples=args.dynamics_samples, iterations=args.dynamics_iterations,
+        hidden=hidden_sizes(args.dynamics_width, args.dynamics_depth), seed=args.seed,
     )
 
     rng = np.random.default_rng(args.seed + 1)
@@ -53,6 +62,8 @@ def main():
     traj_result = solve(
         q_start, q_goal, dyn_result.model,
         n_collocation=args.collocation_points, iterations=args.trajectory_iterations,
+        hidden=hidden_sizes(args.trajectory_width, args.trajectory_depth),
+        torque_hidden=hidden_sizes(args.trajectory_width, args.trajectory_depth),
     )
 
     sample = traj_result.sample(200)
@@ -94,6 +105,32 @@ def main():
     fig_path = OUTPUT_DIR / f"trajectory_{robot.name}.png"
     fig.savefig(fig_path, dpi=130, bbox_inches="tight")
     print(f"\nSaved figure: {fig_path}")
+
+    # Scored against ManipulaPy's *true* inverse dynamics, not the surrogate the
+    # solve optimized through — see metrics.trajectory_metrics for why that
+    # distinction is the whole point of evaluating this task.
+    metrics = trajectory_metrics(traj_result, robot, n_points=200,
+                                 n_collocation_trained=args.collocation_points)
+    metrics["surrogate_val_rmse_rad_s2"] = dyn_result.val_data_rmse
+    print(format_metrics(metrics, "Trajectory metrics (vs. ManipulaPy inverse dynamics)"))
+
+    report = training_report(
+        title=f"Trajectory PINN — {robot.name}",
+        robot_name=robot.name, n_joints=robot.n_joints,
+        config={"task": "trajectory", "dynamics_samples": args.dynamics_samples,
+                "dynamics_iterations": args.dynamics_iterations,
+                "trajectory_iterations": args.trajectory_iterations,
+                "collocation_points": args.collocation_points,
+                "dynamics_width": args.dynamics_width, "dynamics_depth": args.dynamics_depth,
+                "trajectory_width": args.trajectory_width,
+                "trajectory_depth": args.trajectory_depth, "seed": args.seed,
+                "q_start": np.round(q_start, 4), "q_goal": np.round(q_goal, 4)},
+        metrics=metrics, history=traj_result.loss_history,
+        figure=str(fig_path.name),
+        notes=review_trajectory(metrics),
+    )
+    path = write_report(report_path(OUTPUT_DIR, "trajectory", robot.name), report)
+    print(f"Saved report: {path}")
 
 
 if __name__ == "__main__":

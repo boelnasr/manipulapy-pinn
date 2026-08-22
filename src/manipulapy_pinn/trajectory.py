@@ -61,7 +61,7 @@ import torch
 import torch.nn as nn
 
 from .forward_dynamics import ForwardDynamicsPINN
-from .models import MLP
+from .models import build_mlp
 
 
 class TrajectoryAnsatz(nn.Module):
@@ -72,7 +72,7 @@ class TrajectoryAnsatz(nn.Module):
         n = q_start.shape[0]
         self.register_buffer("q_start", torch.tensor(q_start, dtype=torch.float64))
         self.register_buffer("q_goal", torch.tensor(q_goal, dtype=torch.float64))
-        self.correction = MLP(1, n, hidden=hidden)
+        self.correction = build_mlp(1, n, hidden=hidden)
 
     def forward(self, t: torch.Tensor) -> torch.Tensor:
         # t: (N, 1) in [0, 1]
@@ -161,7 +161,7 @@ def solve(
         p.requires_grad_(False)
 
     traj_model = TrajectoryAnsatz(q_start, q_goal, hidden=hidden)
-    torque_model = MLP(1, n, hidden=torque_hidden)
+    torque_model = build_mlp(1, n, hidden=torque_hidden)
     optimizer = torch.optim.Adam(
         list(traj_model.parameters()) + list(torque_model.parameters()), lr=lr
     )
