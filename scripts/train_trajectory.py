@@ -19,6 +19,8 @@ import numpy as np
 
 from manipulapy_pinn import load_robot
 from manipulapy_pinn.forward_dynamics import train as train_dynamics
+from manipulapy_pinn.metrics import format_metrics, trajectory_metrics
+from manipulapy_pinn.report import report_path, review_trajectory, training_report, write_report
 from manipulapy_pinn.trajectory import solve
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "runs"
@@ -94,6 +96,29 @@ def main():
     fig_path = OUTPUT_DIR / f"trajectory_{robot.name}.png"
     fig.savefig(fig_path, dpi=130, bbox_inches="tight")
     print(f"\nSaved figure: {fig_path}")
+
+    # Scored against ManipulaPy's *true* inverse dynamics, not the surrogate the
+    # solve optimized through — see metrics.trajectory_metrics for why that
+    # distinction is the whole point of evaluating this task.
+    metrics = trajectory_metrics(traj_result, robot, n_points=200,
+                                 n_collocation_trained=args.collocation_points)
+    metrics["surrogate_val_rmse_rad_s2"] = dyn_result.val_data_rmse
+    print(format_metrics(metrics, "Trajectory metrics (vs. ManipulaPy inverse dynamics)"))
+
+    report = training_report(
+        title=f"Trajectory PINN — {robot.name}",
+        robot_name=robot.name, n_joints=robot.n_joints,
+        config={"task": "trajectory", "dynamics_samples": args.dynamics_samples,
+                "dynamics_iterations": args.dynamics_iterations,
+                "trajectory_iterations": args.trajectory_iterations,
+                "collocation_points": args.collocation_points, "seed": args.seed,
+                "q_start": np.round(q_start, 4), "q_goal": np.round(q_goal, 4)},
+        metrics=metrics, history=traj_result.loss_history,
+        figure=str(fig_path.name),
+        notes=review_trajectory(metrics),
+    )
+    path = write_report(report_path(OUTPUT_DIR, "trajectory", robot.name), report)
+    print(f"Saved report: {path}")
 
 
 if __name__ == "__main__":

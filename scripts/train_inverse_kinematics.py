@@ -20,7 +20,9 @@ import torch
 from manipulapy_pinn import load_robot
 from manipulapy_pinn.backend_utils import torch_context
 from manipulapy_pinn.inverse_kinematics import train
+from manipulapy_pinn.metrics import format_metrics, inverse_kinematics_metrics
 from manipulapy_pinn.physics import fk_position_residual
+from manipulapy_pinn.report import report_path, review_inverse_kinematics, training_report, write_report
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "runs"
 
@@ -75,6 +77,21 @@ def main():
     fig_path = OUTPUT_DIR / f"inverse_kinematics_{robot.name}.png"
     fig.savefig(fig_path, dpi=130, bbox_inches="tight")
     print(f"Saved figure: {fig_path}")
+
+    metrics = inverse_kinematics_metrics(result.model, robot, n_targets=300,
+                                         rng=np.random.default_rng(args.seed + 2))
+    print(format_metrics(metrics, "Inverse-kinematics metrics (held-out)"))
+
+    report = training_report(
+        title=f"Inverse-kinematics PINN — {robot.name}",
+        robot_name=robot.name, n_joints=robot.n_joints,
+        config={"task": "inverse_kinematics", "iterations": args.iterations, "seed": args.seed},
+        metrics=metrics, history=result.loss_history,
+        figure=str(fig_path.name), checkpoint=str(checkpoint_path.name),
+        notes=review_inverse_kinematics(metrics),
+    )
+    path = write_report(report_path(OUTPUT_DIR, "inverse_kinematics", robot.name), report)
+    print(f"Saved report: {path}")
 
 
 if __name__ == "__main__":
