@@ -44,6 +44,28 @@ Pulls in `ManipulaPy[pytorch]` — the default install has no CUDA
 requirement; everything here runs on CPU (see [Performance](#performance)
 for what that costs).
 
+On Linux, `pip install torch` pulls the CUDA build and ~2.5 GB of `nvidia-*`
+wheels this package never touches. To skip them:
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install -e ".[dev]"
+```
+
+### Without a local machine
+
+The repo ships a [dev container](.devcontainer/devcontainer.json), so
+**GitHub Codespaces** (Code → Codespaces → Create codespace) builds a ready
+environment with no local setup — CPU-only torch, the package installed
+editable, and a verification step that loads `panda` and prints the run
+commands. The default 2-core machine is more than enough: a full training
+cycle is under two minutes.
+
+No GPU is needed anywhere. The networks are three 128-wide float64 layers,
+and the inverse-kinematics loop is bounded by a per-sample Python call into
+ManipulaPy's FK rather than by arithmetic — a GPU would not help and would
+likely hurt.
+
 ## Quick start
 
 ```python
