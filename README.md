@@ -215,6 +215,38 @@ vanishing where they mathematically must) in a few seconds, not
 convergence quality. For that, run the `scripts/` above with their full
 defaults.
 
+## Related work
+
+[`docs/RELATED_WORK.md`](docs/RELATED_WORK.md) is a literature review of the
+research this package draws on — physics-informed dynamics learning, learned
+inverse kinematics, PINN trajectory optimization, and differentiable rigid-body
+simulation — written to be useful rather than flattering. It includes a section
+on [what the literature says the design here gets
+wrong](docs/RELATED_WORK.md#what-the-literature-says-we-got-wrong) and a
+[ranked list of follow-up work](docs/RELATED_WORK.md#ranked-next-steps).
+
+Three findings from it are worth surfacing here, because they bear directly on
+claims made above:
+
+- **The forward-dynamics physics term is algebraically equivalent to the data
+  term under a mass-matrix metric.** Because the labels and the `M, C, g`
+  operators come from the same ManipulaPy model, the EOM residual reduces to
+  `−M(q̈_pred − q̈_true)`, so `physics_loss = ‖MΔ‖²` where `data_loss = ‖Δ‖²`.
+  Same minimizer, no independent signal. The term becomes genuinely informative
+  once the labels come from somewhere else (measurements, noise, a different
+  simulator).
+- **The ~250 ms Coriolis-differentiation cost is a property of op-level eager
+  autodiff, not of the derivative itself.** Analytical RNEA derivatives put the
+  same quantity at ~3–5 µs for a 7-DoF arm (Carpentier & Mansard, RSS 2018;
+  Le Lidec et al., 2024), and `torch.compile` alone is measured at ~4.7× on a
+  comparable arm at batch 1.
+- **The IK accuracy result is a reproduction, not a finding.** A published
+  benchmark of 12 solvers on the Franka Panda measures a plain MLP at 0%
+  success / ~10 mm — and shows warm-started refinement lifting learned solvers
+  to 98.6–100%, converging from seeds up to 207 mm off. The warm-start
+  extension proposed above is the empirically validated fix, and the network
+  does not need to be accurate to be a useful seed.
+
 ## Relationship to ManipulaPy
 
 This package is a downstream consumer of
