@@ -537,12 +537,23 @@ it is "the network's own consistency with the *true* dynamics operator … not
 just its distance to a stored q̈ label" does not survive the algebra — the two
 are the same objective in different metrics.
 
-(This holds as long as the labels and the operators come from the same model
+This holds as long as the labels and the operators come from the same model
 and the same gravity vector, which is the case here: both trace to the same
-ManipulaPy robot with `F_ext = 0` and `gravity = [0, 0, −9.81]`. It is worth
-verifying numerically once ManipulaPy is installed — the prediction is that
-`physics_loss` tracks `data_loss` up to the mass-matrix reweighting and
-floating-point error, and never provides an independent signal.)
+ManipulaPy robot with `F_ext = 0` and `gravity = [0, 0, −9.81]`.
+
+**Verified numerically** on `panda` with ManipulaPy 1.4.1, 64 samples and an
+arbitrary perturbed `q̈_pred` (not a trained network):
+
+```
+max |residual − (−M Δ)|                     = 2.6e-14   (residual scale: 1.1e+01)
+data_loss    = ‖Δ‖²                         = 0.230886
+physics_loss = ‖MΔ‖²                        = 8.842534
+  same quantity recomputed as ‖−MΔ‖²        = 8.842534
+residual at q̈_pred = q̈_true, max            = 2.8e-14   (same zero set)
+```
+
+The identity holds to machine precision. `physics_loss` is `data_loss` in a
+mass-matrix metric — same minimizer, same zero set, no independent signal.
 
 It also cannot capture friction, backlash, or motor dynamics, which is
 precisely the part the semi-parametric literature (Reuss et al. RSS 2022;
