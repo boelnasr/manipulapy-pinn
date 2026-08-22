@@ -48,6 +48,9 @@ class InverseKinematicsPINN(torch.nn.Module):
 class InverseKinematicsResult:
     model: InverseKinematicsPINN
     loss_history: List[dict] = field(default_factory=list)
+    #: Mean Euclidean end-effector position error on held-out targets, in
+    #: **metres** (SI, matching ManipulaPy). Human-readable output is printed
+    #: in mm; convert with ``val_position_rmse * 1000``.
     val_position_rmse: float = float("nan")
 
 
@@ -99,7 +102,7 @@ def train(
         val_rmse = val_residual.pow(2).sum(dim=-1).sqrt().mean().item()
 
     if verbose:
-        print(f"   ✅ Trained in {elapsed:.1f}s — held-out reach error = {val_rmse * 100:.2f} cm "
+        print(f"   ✅ Trained in {elapsed:.1f}s — held-out reach error = {val_rmse * 1000:.1f} mm "
               f"(mean over {n_val} unseen targets)")
 
     return InverseKinematicsResult(model=model, loss_history=history, val_position_rmse=val_rmse)

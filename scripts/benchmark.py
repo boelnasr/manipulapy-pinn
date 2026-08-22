@@ -71,7 +71,7 @@ def benchmark_inverse_kinematics(robot, rng):
     print("=" * 72)
 
     result = train_ik(robot, iterations=600, verbose=False)
-    print(f"PINN held-out reach error: {result.val_position_rmse * 100:.2f} cm")
+    print(f"PINN held-out reach error: {result.val_position_rmse * 1000:.1f} mm")
 
     n_targets = 15  # ManipulaPy's own README documents ~90% DLS success rate from a
     # zero initial guess, with a long latency tail on the rest — small samples of this
@@ -103,9 +103,9 @@ def benchmark_inverse_kinematics(robot, rng):
         pinn_errors = residual.norm(dim=-1).numpy()
 
     print(f"\n{'':30s}{'median error':>14s}{'median time':>16s}")
-    print(f"{'ManipulaPy DLS IK':30s}{np.median(dls_errors) * 100:12.2f} cm{np.median(dls_times) * 1e3:14.2f} ms"
+    print(f"{'ManipulaPy DLS IK':30s}{np.median(dls_errors) * 1e3:12.1f} mm{np.median(dls_times) * 1e3:14.2f} ms"
           f"   ({success_rate * 100:.0f}% converged, of {n_targets})")
-    print(f"{'PINN (batched query)':30s}{np.median(pinn_errors) * 100:12.2f} cm{pinn_batch_time * 1e3:14.4f} ms")
+    print(f"{'PINN (batched query)':30s}{np.median(pinn_errors) * 1e3:12.1f} mm{pinn_batch_time * 1e3:14.4f} ms")
     print(f"Note: median (not mean) is the honest number for DLS — it has a real long tail "
           f"of hard targets that hit the iteration cap; ManipulaPy's own README documents "
           f"the same pattern for this solver. The PINN is a single fixed-cost forward pass, "

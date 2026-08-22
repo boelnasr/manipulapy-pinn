@@ -50,7 +50,7 @@ def main():
         q_pred = result.model(target_val)
         with torch_context():
             residual = fk_position_residual(robot.serial, q_pred, target_val)
-    reach_error_cm = residual.norm(dim=-1).numpy() * 100
+    reach_error_mm = residual.norm(dim=-1).numpy() * 1000
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
     fig.suptitle(f"Inverse-kinematics PINN — {robot.name}", fontweight="bold")
@@ -62,12 +62,12 @@ def main():
     axes[0].set_title("Training curve")
     axes[0].grid(alpha=0.3)
 
-    axes[1].hist(reach_error_cm, bins=30, color="steelblue", alpha=0.85)
-    axes[1].axvline(reach_error_cm.mean(), color="crimson", linestyle="--",
-                     label=f"mean = {reach_error_cm.mean():.1f} cm")
-    axes[1].set_xlabel("reach error [cm]")
+    axes[1].hist(reach_error_mm, bins=30, color="steelblue", alpha=0.85)
+    axes[1].axvline(reach_error_mm.mean(), color="crimson", linestyle="--",
+                     label=f"mean = {reach_error_mm.mean():.0f} mm")
+    axes[1].set_xlabel("reach error [mm]")
     axes[1].set_ylabel("count")
-    axes[1].set_title(f"Held-out reach error (n={len(reach_error_cm)})")
+    axes[1].set_title(f"Held-out reach error (n={len(reach_error_mm)})")
     axes[1].legend()
     axes[1].grid(alpha=0.3)
 
