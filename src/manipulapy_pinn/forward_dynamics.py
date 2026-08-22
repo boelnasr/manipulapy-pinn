@@ -28,7 +28,7 @@ import numpy as np
 import torch
 
 from .data import generate_forward_dynamics_dataset, train_val_split
-from .models import MLP
+from .models import build_mlp
 from .physics import eom_residual, precompute_dynamics_operators
 from .robots import RobotModel
 
@@ -56,7 +56,7 @@ class ForwardDynamicsPINN(torch.nn.Module):
     ):
         super().__init__()
         self.n_joints = n_joints
-        self.net = MLP(3 * n_joints, n_joints, hidden=hidden)
+        self.net = build_mlp(3 * n_joints, n_joints, hidden=hidden)
         zeros3, ones3 = torch.zeros(3 * n_joints), torch.ones(3 * n_joints)
         zeros1, ones1 = torch.zeros(n_joints), torch.ones(n_joints)
         self.register_buffer("input_mean", input_mean if input_mean is not None else zeros3)

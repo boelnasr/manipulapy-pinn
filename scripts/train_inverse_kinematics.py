@@ -21,6 +21,7 @@ from manipulapy_pinn import load_robot
 from manipulapy_pinn.backend_utils import torch_context
 from manipulapy_pinn.inverse_kinematics import train
 from manipulapy_pinn.metrics import format_metrics, inverse_kinematics_metrics
+from manipulapy_pinn.models import hidden_sizes
 from manipulapy_pinn.physics import fk_position_residual
 from manipulapy_pinn.report import report_path, review_inverse_kinematics, training_report, write_report
 
@@ -31,6 +32,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--robot", default="panda")
     parser.add_argument("--iterations", type=int, default=600)
+    parser.add_argument("--width", type=int, default=128, help="units per hidden layer")
+    parser.add_argument("--depth", type=int, default=3,
+                        help="number of hidden layers; >4 switches to residual blocks")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
@@ -38,7 +42,10 @@ def main():
     robot = load_robot(args.robot)
     print(f"Robot: {robot.name} ({robot.n_joints} DOF)")
 
-    result = train(robot, iterations=args.iterations, seed=args.seed)
+    hidden = hidden_sizes(args.width, args.depth)
+    result = train(robot, iterations=args.iterations, hidden=hidden, seed=args.seed)
+    print(f"Network: {type(result.model.net).__name__} {args.depth}x{args.width} "
+          f"({sum(p.numel() for p in result.model.parameters())} parameters)")
 
     checkpoint_path = OUTPUT_DIR / f"inverse_kinematics_{robot.name}.pt"
     torch.save(result.model.state_dict(), checkpoint_path)
@@ -85,7 +92,9 @@ def main():
     report = training_report(
         title=f"Inverse-kinematics PINN — {robot.name}",
         robot_name=robot.name, n_joints=robot.n_joints,
-        config={"task": "inverse_kinematics", "iterations": args.iterations, "seed": args.seed},
+        config={"task": "inverse_kinematics", "iterations": args.iterations,
+                "width": args.width, "depth": args.depth,
+                "architecture": type(result.model.net).__name__, "seed": args.seed},
         metrics=metrics, history=result.loss_history,
         figure=str(fig_path.name), checkpoint=str(checkpoint_path.name),
         notes=review_inverse_kinematics(metrics),

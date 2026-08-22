@@ -27,7 +27,7 @@ import numpy as np
 import torch
 
 from .backend_utils import torch_context
-from .models import MLP
+from .models import build_mlp
 from .physics import fk_position_residual
 from .robots import RobotModel
 
@@ -38,7 +38,7 @@ class InverseKinematicsPINN(torch.nn.Module):
     def __init__(self, n_joints: int, hidden=(128, 128, 128)):
         super().__init__()
         self.n_joints = n_joints
-        self.net = MLP(3, n_joints, hidden=hidden)
+        self.net = build_mlp(3, n_joints, hidden=hidden)
 
     def forward(self, target_position: torch.Tensor) -> torch.Tensor:
         return self.net(target_position)
