@@ -91,7 +91,11 @@ def train(
     log_every: int = 200,
     verbose: bool = True,
 ) -> ForwardDynamicsResult:
+    # Seed torch as well as NumPy: NumPy alone controls the sampled states, but
+    # network initialization comes from torch's global generator, so without this
+    # two runs with the same `seed` differ by more than most effects worth measuring.
     rng = np.random.default_rng(seed)
+    torch.manual_seed(seed)
     data = generate_forward_dynamics_dataset(robot, n_samples, rng)
     train_data, val_data = train_val_split(data, val_fraction, rng)
 

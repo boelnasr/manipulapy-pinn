@@ -65,7 +65,11 @@ def train(
     log_every: int = 100,
     verbose: bool = True,
 ) -> InverseKinematicsResult:
+    # Seed torch as well as NumPy — see the note in forward_dynamics.train; here it
+    # matters even more, since targets are resampled every step and initialization
+    # is the only other source of run-to-run variation.
     rng = np.random.default_rng(seed)
+    torch.manual_seed(seed)
     model = InverseKinematicsPINN(robot.n_joints, hidden=hidden)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     history = []
