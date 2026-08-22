@@ -224,6 +224,44 @@ with ManipulaPy's classical solvers directly.
   — more samples, more iterations, and a wider network all still improve
   held-out RMSE at the point this was written.
 
+## Evaluating a trained model
+
+Every `train_*.py` script scores its model after training and writes a
+Markdown report next to the checkpoint and figure:
+
+```
+runs/forward_dynamics_panda.md
+runs/inverse_kinematics_panda.md
+runs/trajectory_panda.md
+```
+
+Each report records the full configuration and environment (so a run is
+reproducible), the loss trajectory, the complete metric block, and a
+**Review** section listing anything an automatic threshold check flagged.
+
+The metrics ([`metrics.py`](src/manipulapy_pinn/metrics.py)) deliberately
+measure what a training loss cannot:
+
+| Task | Beyond the loss |
+|---|---|
+| Forward dynamics | per-joint and scale-free (normalized) RMSE, R², **skill score** against a constant-mean predictor, and the acceleration error mapped through the true mass matrix into N·m |
+| Inverse kinematics | median/p95/max reach error, **success rate at 1/5/10/50 mm**, **joint-limit violation rate**, and the orientation error the position-only loss leaves unconstrained |
+| Trajectory | torque error against ManipulaPy's **true `inverse_dynamics`** rather than the learned surrogate the solve optimized through, evaluated on a dense grid *and* on the training collocation points so the two can be compared |
+
+Call them directly on any trained model:
+
+```python
+from manipulapy_pinn.metrics import forward_dynamics_metrics, format_metrics
+
+print(format_metrics(forward_dynamics_metrics(result.model, robot), "Forward dynamics"))
+```
+
+Three of these check things nothing in training constrains — an IK network's
+output is not bounded by the robot's joint limits, and a trajectory's
+interior is bounded by neither velocity nor torque — so a model can score
+well on its loss and still be unusable. The review section says so in
+words.
+
 ## Testing
 
 ```bash
