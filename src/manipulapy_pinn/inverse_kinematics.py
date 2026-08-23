@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Physics-informed inverse kinematics: q = h_θ(target position).
+"""Physics-informed inverse kinematics: q = h_θ(target pose).
 
-Trained on the forward-kinematics *constraint* itself — FK(h_θ(x)) ≈ x —
+Trained on the forward-kinematics *constraint* itself — FK(h_θ(x)) ≈ x, in
+both position and orientation —
 differentiated live through ManipulaPy's ``forward_kinematics`` under the
 torch backend (see ``physics.fk_position_residual``), not on a stored table
 of (pose, q) pairs. That distinction matters at a redundant robot: there is
@@ -28,20 +29,30 @@ import torch
 
 from .backend_utils import torch_context
 from .models import build_mlp
-from .physics import fk_position_residual
+from .physics import fk_pose_residual, pose_features
 from .robots import RobotModel
 
 
 class InverseKinematicsPINN(torch.nn.Module):
-    """q = h_θ(target end-effector position)."""
+    """q = h_θ(target end-effector pose).
+
+    Input is the 12-vector from :func:`physics.pose_features` — position plus
+    the flattened rotation matrix. The rotation enters as a matrix rather than
+    Euler angles or a quaternion because those parameterizations are
+    discontinuous, and a network would have to learn around a wraparound that
+    is not present in the geometry.
+    """
+
+    #: Width of the pose vector this network consumes.
+    POSE_DIM = 12
 
     def __init__(self, n_joints: int, hidden=(128,) * 5):
         super().__init__()
         self.n_joints = n_joints
-        self.net = build_mlp(3, n_joints, hidden=hidden)
+        self.net = build_mlp(self.POSE_DIM, n_joints, hidden=hidden)
 
-    def forward(self, target_position: torch.Tensor) -> torch.Tensor:
-        return self.net(target_position)
+    def forward(self, target_pose: torch.Tensor) -> torch.Tensor:
+        return self.net(target_pose)
 
 
 @dataclass
@@ -52,6 +63,8 @@ class InverseKinematicsResult:
     #: **metres** (SI, matching ManipulaPy). Human-readable output is printed
     #: in mm; convert with ``val_position_rmse * 1000``.
     val_position_rmse: float = float("nan")
+    #: Mean end-effector orientation error on held-out targets, in **degrees**.
+    val_orientation_deg: float = float("nan")
 
 
 def train(
@@ -59,6 +72,8 @@ def train(
     iterations: int = 600,
     batch_size: int = 32,
     lr: float = 1e-3,
+    position_weight: float = 1.0,
+    orientation_weight: float = 1.0,
     n_val: int = 64,
     # Five layers, which build_mlp turns into residual blocks. Confirmed at this
     # task's own default budget of 600 iterations, two seeds per depth, held-out
@@ -95,35 +110,50 @@ def train(
         print(f"   Training inverse-kinematics PINN on {robot.name} "
               f"({batch_size} fresh reachable targets/step, {iterations} steps)...")
     start = time.time()
+    def _targets(n):
+        """Sample reachable poses and return (features, position, rotation)."""
+        q_sample = robot.sample_configurations(n, rng)
+        poses = torch.tensor(robot.forward_kinematics(q_sample), dtype=torch.float64)
+        return pose_features(poses), poses[:, :3, 3], poses[:, :3, :3]
+
     for it in range(iterations):
         # Target generation runs on the fast NumPy backend (the default) —
         # only the network's own FK call, on q_pred, needs torch autograd.
-        q_sample = robot.sample_configurations(batch_size, rng)
-        target = torch.tensor(robot.forward_kinematics(q_sample)[:, :3, 3], dtype=torch.float64)
+        features, target_p, target_R = _targets(batch_size)
 
         optimizer.zero_grad()
-        q_pred = model(target)
+        q_pred = model(features)
         with torch_context():
-            residual = fk_position_residual(robot.serial, q_pred, target)
-        loss = residual.pow(2).mean()
+            pos_res, ori_res = fk_pose_residual(robot.serial, q_pred, target_p, target_R)
+        position_loss = pos_res.pow(2).sum(dim=-1).mean()
+        orientation_loss = ori_res.mean()
+        loss = position_weight * position_loss + orientation_weight * orientation_loss
         loss.backward()
         optimizer.step()
 
-        history.append({"iter": it, "loss": loss.item()})
+        history.append({"iter": it, "loss": loss.item(),
+                        "position": position_loss.item(), "orientation": orientation_loss.item()})
         if verbose and (it % log_every == 0 or it == iterations - 1):
-            print(f"     step {it:4d}   position MSE = {loss.item():.6f} m²")
+            print(f"     step {it:4d}   position = {position_loss.item():.6f} m²   "
+                  f"orientation = {orientation_loss.item():.6f} rad²")
     elapsed = time.time() - start
 
     with torch.no_grad():
-        q_val = robot.sample_configurations(n_val, rng)
-        target_val = torch.tensor(robot.forward_kinematics(q_val)[:, :3, 3], dtype=torch.float64)
-        q_pred_val = model(target_val)
+        features_v, target_pv, target_Rv = _targets(n_val)
+        q_pred_val = model(features_v)
         with torch_context():
-            val_residual = fk_position_residual(robot.serial, q_pred_val, target_val)
-        val_rmse = val_residual.pow(2).sum(dim=-1).sqrt().mean().item()
+            pos_res, _ = fk_pose_residual(robot.serial, q_pred_val, target_pv, target_Rv)
+            achieved_R = torch.stack([robot.serial.forward_kinematics(q)[:3, :3] for q in q_pred_val])
+        val_rmse = pos_res.pow(2).sum(dim=-1).sqrt().mean().item()
+        # Report the geodesic angle rather than the chordal quantity trained on:
+        # the chordal form is the better gradient, degrees are the better report.
+        cos = ((achieved_R.transpose(-2, -1) @ target_Rv).diagonal(dim1=-2, dim2=-1).sum(-1) - 1) / 2
+        val_orientation = torch.rad2deg(torch.arccos(cos.clamp(-1.0, 1.0))).mean().item()
 
     if verbose:
-        print(f"   ✅ Trained in {elapsed:.1f}s — held-out reach error = {val_rmse * 1000:.1f} mm "
-              f"(mean over {n_val} unseen targets)")
+        print(f"   ✅ Trained in {elapsed:.1f}s — held-out reach error = {val_rmse * 1000:.1f} mm, "
+              f"orientation error = {val_orientation:.1f}° (mean over {n_val} unseen targets)")
 
-    return InverseKinematicsResult(model=model, loss_history=history, val_position_rmse=val_rmse)
+    return InverseKinematicsResult(model=model, loss_history=history,
+                                   val_position_rmse=val_rmse,
+                                   val_orientation_deg=val_orientation)

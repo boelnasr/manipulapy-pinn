@@ -33,6 +33,10 @@ def main():
     parser.add_argument("--width", type=int, default=128, help="units per hidden layer")
     parser.add_argument("--depth", type=int, default=5,
                         help="number of hidden layers; >4 switches to residual blocks")
+    parser.add_argument("--position-weight", type=float, default=1.0,
+                        help="weight on the position term [m²]")
+    parser.add_argument("--orientation-weight", type=float, default=1.0,
+                        help="weight on the orientation term [rad²]; 0 disables it")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
@@ -41,7 +45,9 @@ def main():
     print(f"Robot: {robot.name} ({robot.n_joints} DOF)")
 
     hidden = hidden_sizes(args.width, args.depth)
-    result = train(robot, iterations=args.iterations, hidden=hidden, seed=args.seed)
+    result = train(robot, iterations=args.iterations, hidden=hidden,
+                   position_weight=args.position_weight,
+                   orientation_weight=args.orientation_weight, seed=args.seed)
     print(f"Network: {type(result.model.net).__name__} {args.depth}x{args.width} "
           f"({sum(p.numel() for p in result.model.parameters())} parameters)")
 
@@ -63,6 +69,9 @@ def main():
         title=f"Inverse-kinematics PINN — {robot.name}",
         robot_name=robot.name, n_joints=robot.n_joints,
         config={"task": "inverse_kinematics", "iterations": args.iterations,
+                "position_weight": args.position_weight,
+                "orientation_weight": args.orientation_weight,
+                "orientation_deg": result.val_orientation_deg,
                 "width": args.width, "depth": args.depth,
                 "architecture": type(result.model.net).__name__, "seed": args.seed},
         metrics=metrics, history=result.loss_history,

@@ -24,6 +24,7 @@ import torch
 
 from .backend_utils import numpy_context
 from .data import GRAVITY, generate_forward_dynamics_dataset
+from .physics import pose_features
 
 #: One colour per joint, stable across every figure in a run so joint 3 is the
 #: same colour in the position, velocity and torque plots.
@@ -163,7 +164,8 @@ def inverse_kinematics_figures(result, robot, metrics: Dict, rng=None, n_eval: i
     poses = robot.forward_kinematics(q_ref)
     targets = poses[:, :3, 3]
     with torch.no_grad():
-        q_pred = result.model(torch.tensor(targets, dtype=torch.float64)).numpy()
+        features = pose_features(torch.tensor(poses, dtype=torch.float64))
+        q_pred = result.model(features).numpy()
     with numpy_context():
         achieved = np.stack([robot.serial.forward_kinematics(q) for q in q_pred])
     err_mm = np.linalg.norm(achieved[:, :3, 3] - targets, axis=-1) * 1000.0
@@ -181,13 +183,18 @@ def inverse_kinematics_figures(result, robot, metrics: Dict, rng=None, n_eval: i
     fig, ax = plt.subplots(1, 2, figsize=(11.5, 4.3))
     it = [h["iter"] for h in result.loss_history]
     loss = [h["loss"] for h in result.loss_history]
-    ax[0].plot(it, loss, color=TRAIN_C, lw=1.0, label="FK-residual MSE (train batch)")
+    if "position" in result.loss_history[0]:
+        ax[0].plot(it, [h["position"] for h in result.loss_history], color=TRAIN_C, lw=0.9,
+                   label="position term  [m²]")
+        ax[0].plot(it, [h["orientation"] for h in result.loss_history], color=WARN_C, lw=0.9,
+                   label="orientation term  [rad²]")
+    ax[0].plot(it, loss, color=REF_C, lw=1.4, alpha=0.8, label="total (weighted)")
     if len(loss) > 40:
         w = max(5, len(loss) // 40)
         smooth = np.convolve(loss, np.ones(w) / w, mode="valid")
         ax[0].plot(it[w - 1:], smooth, color=VAL_C, lw=1.6, label=f"moving average ({w} steps)")
     ax[0].set_yscale("log")
-    _finish(ax[0], "iteration", "MSE  [m²]", "Convergence")
+    _finish(ax[0], "iteration", "loss term  [see legend]", "Convergence — position and orientation")
 
     # Each step draws fresh targets, so the per-step loss is itself a sample of
     # generalization: there is no fixed training set to memorize.
@@ -226,7 +233,7 @@ def inverse_kinematics_figures(result, robot, metrics: Dict, rng=None, n_eval: i
     ax[0].axvline(orient_deg.mean(), color=VAL_C, lw=1.6, label=f"mean {orient_deg.mean():.0f}°")
     ax[0].axvline(90, color=REF_C, ls="--", lw=1.2, label="90° (uninformative)")
     _finish(ax[0], "orientation error  [deg]", "count",
-            "Orientation — unconstrained by the loss\n(position-only residual leaves this free)")
+            "Orientation error — now part of the loss")
 
     n = robot.n_joints
     idx = np.arange(n)

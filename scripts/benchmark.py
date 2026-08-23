@@ -24,7 +24,7 @@ from manipulapy_pinn import load_robot
 from manipulapy_pinn.backend_utils import torch_context
 from manipulapy_pinn.forward_dynamics import train as train_dynamics
 from manipulapy_pinn.inverse_kinematics import train as train_ik
-from manipulapy_pinn.physics import fk_position_residual
+from manipulapy_pinn.physics import fk_position_residual, pose_features
 from manipulapy_pinn.trajectory import solve as solve_trajectory
 
 
@@ -94,9 +94,10 @@ def benchmark_inverse_kinematics(robot, rng):
     success_rate = np.mean(dls_ok)
 
     target_t = torch.tensor(targets, dtype=torch.float64)
+    features = pose_features(torch.tensor(robot.forward_kinematics(q_targets), dtype=torch.float64))
     with torch.no_grad():
         start = time.time()
-        q_pred = result.model(target_t)
+        q_pred = result.model(features)
         pinn_batch_time = (time.time() - start) / len(targets)
         with torch_context():
             residual = fk_position_residual(robot.serial, q_pred, target_t)

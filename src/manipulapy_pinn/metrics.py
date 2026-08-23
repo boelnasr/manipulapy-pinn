@@ -26,6 +26,7 @@ import torch
 
 from .backend_utils import numpy_context
 from .data import GRAVITY, generate_forward_dynamics_dataset
+from .physics import pose_features
 from .robots import RobotModel
 
 
@@ -115,11 +116,11 @@ def inverse_kinematics_metrics(
       FK-residual loss constrains the output to the robot's joint limits, so
       a configuration that reaches the target perfectly may still be
       unreachable. Limits come from ManipulaPy's URDF parse.
-    - **Orientation error.** The loss matches *position only*, so end-effector
-      orientation is entirely unconstrained. Measuring it against the pose of
-      the configuration that generated the target quantifies what that
-      choice costs; it is not a failure of training, but it is not free
-      either.
+    - **Orientation error.** Reported in degrees, as the geodesic angle
+      between the achieved and target rotations. Training minimizes a chordal
+      surrogate of this (see ``physics.fk_pose_residual``) because its
+      gradient is well behaved near zero, but degrees are the interpretable
+      report.
     """
     rng = rng if rng is not None else np.random.default_rng(0)
     q_ref = robot.sample_configurations(n_targets, rng)
@@ -127,7 +128,8 @@ def inverse_kinematics_metrics(
     targets = poses[:, :3, 3]
 
     with torch.no_grad():
-        q_pred = model(torch.tensor(targets, dtype=torch.float64)).numpy()
+        features = pose_features(torch.tensor(poses, dtype=torch.float64))
+        q_pred = model(features).numpy()
 
     with numpy_context():
         achieved = np.stack([robot.serial.forward_kinematics(q) for q in q_pred])

@@ -10,7 +10,7 @@ Two different strategies are used here, and the difference matters:
   and reused as constants every step. Only q̈_pred (the network's output)
   needs a gradient.
 
-- **Kinematic residuals** (``fk_position_residual``): the network's output
+- **Kinematic residuals** (``fk_pose_residual``): the network's output
   (q_pred) feeds directly into ``forward_kinematics``, and that dependency
   changes every step — so it has to run live, under the torch backend, with
   autograd tracking through the FK call itself. ManipulaPy's FK is cheap
@@ -76,14 +76,56 @@ def eom_residual(
     return tau - predicted_tau
 
 
-def fk_position_residual(serial, q_pred: torch.Tensor, target_position: torch.Tensor) -> torch.Tensor:
-    """Batched end-effector position residual, differentiated live through FK.
+def fk_pose_residual(serial, q_pred: torch.Tensor, target_position: torch.Tensor,
+                     target_rotation: torch.Tensor = None):
+    """Batched end-effector pose residual, differentiated live through FK.
+
+    Returns ``(position_residual, orientation_residual)``:
+
+    - **position** — ``(N, 3)`` in metres, so its squared norm is m².
+    - **orientation** — ``(N,)``, half the squared Frobenius distance between
+      the achieved and target rotation matrices. That quantity is
+      ``2(1 − cos θ)`` for a relative rotation angle θ, so it behaves like θ²
+      for small errors and puts the two terms in comparable units: a weight of
+      1 on each makes a 1 mm position error cost about the same as a 1 mrad
+      orientation error.
+
+    The Frobenius (chordal) form is used rather than the geodesic angle
+    ``arccos((tr R − 1)/2)`` on purpose. The geodesic distance is the more
+    natural metric, but its gradient is unbounded at θ = 0 — exactly where a
+    converging optimizer spends its time — so training on it destabilizes as
+    the model gets good. The chordal form is smooth everywhere and monotone in
+    θ over [0, π], so it ranks solutions identically.
 
     ``q_pred`` must be a torch tensor produced under ``use_backend("torch")``
     with ``requires_grad`` tracing back to network parameters — this is what
     makes the inverse-kinematics PINN "physics-informed" rather than a plain
     regression: the loss is defined by the forward-kinematics constraint
     itself, not by a table of (pose, q) pairs.
+
+    ``target_rotation`` may be omitted, in which case only the position
+    residual is meaningful and the orientation residual is returned as zeros.
     """
-    positions = torch.stack([serial.forward_kinematics(q)[:3, 3] for q in q_pred])
-    return target_position - positions
+    poses = torch.stack([serial.forward_kinematics(q) for q in q_pred])
+    position_residual = target_position - poses[..., :3, 3]
+    if target_rotation is None:
+        return position_residual, torch.zeros(len(q_pred), dtype=position_residual.dtype)
+    rot_diff = poses[..., :3, :3] - target_rotation
+    orientation_residual = 0.5 * rot_diff.pow(2).sum(dim=(-2, -1))
+    return position_residual, orientation_residual
+
+
+def fk_position_residual(serial, q_pred: torch.Tensor, target_position: torch.Tensor) -> torch.Tensor:
+    """Position-only pose residual — see :func:`fk_pose_residual`."""
+    return fk_pose_residual(serial, q_pred, target_position)[0]
+
+
+def pose_features(poses: torch.Tensor) -> torch.Tensor:
+    """Flatten 4x4 poses into the 12-vector the IK network takes as input.
+
+    Layout is ``[position (3), rotation matrix row-major (9)]``. The rotation
+    is passed as the full matrix rather than Euler angles or a quaternion
+    because both of those are discontinuous as functions of the pose — a
+    network has to learn around a wraparound that isn't in the geometry.
+    """
+    return torch.cat([poses[..., :3, 3], poses[..., :3, :3].reshape(*poses.shape[:-2], 9)], dim=-1)
