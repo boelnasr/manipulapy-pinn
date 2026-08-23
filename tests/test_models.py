@@ -91,3 +91,22 @@ def test_networks_are_twice_differentiable_in_their_input():
         (qddot,) = torch.autograd.grad(qdot.sum(), t, create_graph=True)
         assert qdot.shape == t.shape and qddot.shape == t.shape
         assert torch.isfinite(qddot).all()
+
+
+def test_training_is_reproducible_from_seed(robot):
+    """Same seed -> identical result, including network initialization.
+
+    Regression test: both trainers seeded NumPy but not torch, so the sampled
+    states repeated while the weights did not, and two runs of the "same"
+    configuration differed by more than most effects worth measuring.
+    """
+    from manipulapy_pinn.forward_dynamics import train as train_fd
+    from manipulapy_pinn.inverse_kinematics import train as train_ik
+
+    a = train_fd(robot, n_samples=60, iterations=5, seed=3, verbose=False)
+    b = train_fd(robot, n_samples=60, iterations=5, seed=3, verbose=False)
+    assert a.val_data_rmse == b.val_data_rmse
+
+    c = train_ik(robot, iterations=5, batch_size=4, seed=3, verbose=False)
+    d = train_ik(robot, iterations=5, batch_size=4, seed=3, verbose=False)
+    assert c.val_position_rmse == d.val_position_rmse

@@ -17,7 +17,7 @@ def test_forward_dynamics_pinn_output_shape(robot):
 
 def test_forward_dynamics_training_reduces_loss_and_stays_finite(robot):
     result = train(
-        robot, n_samples=40, iterations=30, val_fraction=0.25,
+        robot, n_samples=40, iterations=30,
         hidden=(16, 16), log_every=1000, verbose=False,
     )
     losses = [h["loss"] for h in result.loss_history]

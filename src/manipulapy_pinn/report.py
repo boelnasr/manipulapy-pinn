@@ -59,10 +59,41 @@ def _loss_table(history: Sequence[dict], n_rows: int = 8) -> str:
     return "\n".join(lines) + "\n"
 
 
+#: Every automatic check, as ``metric -> (threshold, direction)`` where direction
+#: is the side that is *bad*. Single source of truth: the review functions below
+#: read these, and ``plots.summary`` draws each metric against its own threshold
+#: so the two can never disagree about where the line is.
+REVIEW_THRESHOLDS = {
+    # forward dynamics
+    "skill_score":                (0.5,  "below"),
+    "r2":                         (0.9,  "below"),
+    "nrmse_worst_joint":          (0.7,  "above"),
+    # inverse kinematics
+    "joint_limit_violation_rate": (0.01, "above"),
+    "success_rate_10mm":          (0.5,  "below"),
+    "orientation_mean_deg":       (30.0, "above"),
+    # trajectory
+    "torque_relative_error":      (0.25, "above"),
+    "dense_vs_collocation_ratio": (1.5,  "above"),
+    "boundary_qdot_start_rad_s":  (0.05, "above"),
+    "boundary_qdot_end_rad_s":    (0.05, "above"),
+    "peak_speed_rad_s":           (2.6,  "above"),
+}
+
+
+def threshold_status(metric: str, value: float):
+    """``(passes, threshold, direction)`` for a metric, or ``None`` if unchecked."""
+    if metric not in REVIEW_THRESHOLDS or value is None:
+        return None
+    threshold, direction = REVIEW_THRESHOLDS[metric]
+    passes = value >= threshold if direction == "below" else value <= threshold
+    return passes, threshold, direction
+
+
 def review_forward_dynamics(m: Dict) -> List[str]:
     """Threshold checks a forward-dynamics loss curve cannot show."""
     notes = []
-    if m.get("skill_score", 1.0) < 0.5:
+    if m.get("skill_score", 1.0) < REVIEW_THRESHOLDS["skill_score"][0]:
         notes.append(
             f"**Weak skill score ({m['skill_score']:.2f}).** The model reduces error only "
             f"{m['skill_score'] * 100:.0f}% below a constant predictor that always outputs the "
@@ -70,14 +101,14 @@ def review_forward_dynamics(m: Dict) -> List[str]:
             f"of the state dependence — train longer, and especially on more samples."
         )
     nrmse = m.get("nrmse_per_joint")
-    if nrmse is not None and len(nrmse) and float(np.max(nrmse)) > 0.7:
+    if nrmse is not None and len(nrmse) and float(np.max(nrmse)) > REVIEW_THRESHOLDS["nrmse_worst_joint"][0]:
         j = int(np.argmax(nrmse))
         notes.append(
             f"**Joint {j} is poorly modelled** (normalized RMSE {float(nrmse[j]):.2f}; a value of "
             f"1.0 means no better than predicting that joint's mean). Check its mass-matrix "
             f"conditioning before trusting this model — see the URDF caveat in `robots.py`."
         )
-    if m.get("r2", 1.0) < 0.9:
+    if m.get("r2", 1.0) < REVIEW_THRESHOLDS["r2"][0]:
         notes.append(
             f"**R² = {m['r2']:.3f}** on held-out states. Below ~0.9 the surrogate is not accurate "
             f"enough to stand in for the true dynamics in `trajectory.solve`, whose result can be "
@@ -89,7 +120,7 @@ def review_forward_dynamics(m: Dict) -> List[str]:
 def review_inverse_kinematics(m: Dict) -> List[str]:
     """Threshold checks an FK-residual loss cannot show."""
     notes = []
-    if m.get("joint_limit_violation_rate", 0.0) > 0.01:
+    if m.get("joint_limit_violation_rate", 0.0) > REVIEW_THRESHOLDS["joint_limit_violation_rate"][0]:
         notes.append(
             f"**{m['joint_limit_violation_rate'] * 100:.1f}% of predicted configurations violate "
             f"the robot's joint limits** (worst overshoot {m['joint_limit_max_violation_rad']:.3f} "
@@ -98,7 +129,7 @@ def review_inverse_kinematics(m: Dict) -> List[str]:
             f"robot cannot adopt. Any use of these outputs on hardware — or as a solver seed — "
             f"must clamp or penalize this."
         )
-    if m.get("success_rate_10mm", 0.0) < 0.5:
+    if m.get("success_rate_10mm", 0.0) < REVIEW_THRESHOLDS["success_rate_10mm"][0]:
         notes.append(
             f"**Only {m['success_rate_10mm'] * 100:.0f}% of targets are reached within 10 mm** "
             f"(median error {m['median_mm']:.1f} mm). This is the expected regime for a "
@@ -106,7 +137,7 @@ def review_inverse_kinematics(m: Dict) -> List[str]:
             f"still viable as a warm start for a numerical solver, which converges from seeds far "
             f"worse than this. It is not usable as a final answer."
         )
-    if m.get("orientation_mean_deg", 0.0) > 30:
+    if m.get("orientation_mean_deg", 0.0) > REVIEW_THRESHOLDS["orientation_mean_deg"][0]:
         notes.append(
             f"**End-effector orientation is off by {m['orientation_mean_deg']:.0f}° on average.** "
             f"Expected, not a regression: the loss matches position only, so orientation is "
@@ -125,7 +156,7 @@ def review_trajectory(m: Dict) -> List[str]:
     """Threshold checks the surrogate-based training residual cannot show."""
     notes = []
     rel = m.get("torque_relative_error")
-    if rel is not None and rel > 0.25:
+    if rel is not None and rel > REVIEW_THRESHOLDS["torque_relative_error"][0]:
         notes.append(
             f"**The trajectory is not dynamically consistent under real physics.** The torque "
             f"network's output differs from the torque ManipulaPy's `inverse_dynamics` says the "
@@ -136,7 +167,7 @@ def review_trajectory(m: Dict) -> List[str]:
             f"*learned* surrogate, so it can be small while this is large."
         )
     ratio = m.get("dense_vs_collocation_ratio")
-    if ratio is not None and ratio > 1.5:
+    if ratio is not None and ratio > REVIEW_THRESHOLDS["dense_vs_collocation_ratio"][0]:
         notes.append(
             f"**Overfitted to the collocation points.** Torque error on a dense grid is "
             f"{ratio:.1f}× the error on the training collocation points. The residual is being "
@@ -144,13 +175,13 @@ def review_trajectory(m: Dict) -> List[str]:
             f"resample them each iteration instead of reusing a fixed grid."
         )
     for key, label in (("boundary_qdot_start_rad_s", "start"), ("boundary_qdot_end_rad_s", "end")):
-        if m.get(key, 0.0) > 0.05:
+        if m.get(key, 0.0) > REVIEW_THRESHOLDS[key][0]:
             notes.append(
                 f"**Non-zero velocity at trajectory {label}** ({m[key]:.3f} rad/s). This is a soft "
                 f"penalty, not a hard constraint, so it is never satisfied exactly — raise "
                 f"`boundary_velocity_weight` if it matters."
             )
-    if m.get("peak_speed_rad_s", 0.0) > 2.6:
+    if m.get("peak_speed_rad_s", 0.0) > REVIEW_THRESHOLDS["peak_speed_rad_s"][0]:
         notes.append(
             f"**Peak joint speed {m['peak_speed_rad_s']:.2f} rad/s** exceeds a Franka Panda's "
             f"~2.6 rad/s limit. Nothing in the loss bounds the interior of the trajectory — this "
@@ -211,7 +242,10 @@ def training_report(
     else:
         out.append("No automatic threshold checks were triggered for this run.")
 
-    artifacts = [a for a in (checkpoint, figure) if a]
+    # `figure` may be a single name or a list of them, since each task now
+    # writes a set rather than one combined plot.
+    figure_names = [figure] if isinstance(figure, str) else list(figure or [])
+    artifacts = [a for a in [checkpoint, *figure_names] if a]
     if artifacts:
         out += ["", "## Artifacts", ""] + [f"- `{a}`" for a in artifacts]
 
