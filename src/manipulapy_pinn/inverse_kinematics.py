@@ -60,17 +60,23 @@ def train(
     batch_size: int = 32,
     lr: float = 1e-3,
     n_val: int = 64,
-    # Five layers, which build_mlp turns into residual blocks. Measured on panda
-    # at 1500 iterations, two seeds per depth so the run-to-run spread is visible
-    # alongside the effect -- mean held-out reach error:
+    # Five layers, which build_mlp turns into residual blocks. Confirmed at this
+    # task's own default budget of 600 iterations, two seeds per depth, held-out
+    # reach error:
     #
-    #   depth 3   56.5 / 58.3 mm   -> 57.4
-    #   depth 5   34.2 / 41.4 mm   -> 37.8   <- best
-    #   depth 8   73.7 / 61.6 mm   -> 67.7
+    #   depth 3   84.7 / 100.6 mm   -> 92.7
+    #   depth 5   49.0 /  64.9 mm   -> 57.0   <- default
+    #   (at 1500 iterations: 57.4 vs 37.8 mm, same ordering)
     #
-    # The separation is larger than the spread: the worst depth-5 run still beats
-    # the best depth-3 run. Depth 8 is worse than depth 3, matching what forward
-    # dynamics shows -- residual blocks make depth usable, not free.
+    # The worst depth-5 run beats the best depth-3 run, so the separation
+    # exceeds the run-to-run spread.
+    #
+    # Note this is the opposite conclusion from forward dynamics, where depth 5
+    # is a wash at the default budget. The reason is that this task has no fixed
+    # dataset: every step draws fresh targets, so there is nothing to memorize
+    # and extra capacity goes into fitting the map rather than the sample.
+    # Forward dynamics trains on a fixed set and overfits it, which is why the
+    # deeper network there needs a bigger dataset before it pays.
     hidden=(128,) * 5,
     seed: int = 0,
     log_every: int = 100,
