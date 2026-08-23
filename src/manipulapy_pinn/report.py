@@ -211,7 +211,10 @@ def training_report(
     else:
         out.append("No automatic threshold checks were triggered for this run.")
 
-    artifacts = [a for a in (checkpoint, figure) if a]
+    # `figure` may be a single name or a list of them, since each task now
+    # writes a set rather than one combined plot.
+    figure_names = [figure] if isinstance(figure, str) else list(figure or [])
+    artifacts = [a for a in [checkpoint, *figure_names] if a]
     if artifacts:
         out += ["", "## Artifacts", ""] + [f"- `{a}`" for a in artifacts]
 

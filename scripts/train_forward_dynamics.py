@@ -13,7 +13,6 @@ import matplotlib
 
 if "MPLBACKEND" not in os.environ:
     matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
@@ -21,6 +20,7 @@ from manipulapy_pinn import load_robot
 from manipulapy_pinn.forward_dynamics import train
 from manipulapy_pinn.metrics import format_metrics, forward_dynamics_metrics
 from manipulapy_pinn.models import hidden_sizes
+from manipulapy_pinn.plots import forward_dynamics_figures, save_figures
 from manipulapy_pinn.report import report_path, review_forward_dynamics, training_report, write_report
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "runs"
@@ -51,59 +51,15 @@ def main():
     torch.save(result.model.state_dict(), checkpoint_path)
     print(f"Saved checkpoint: {checkpoint_path}")
 
-    # Held-out scatter: predicted vs. true q̈, one point per (sample, joint).
-    rng = np.random.default_rng(args.seed + 1)
-    from manipulapy_pinn.data import generate_forward_dynamics_dataset
-
-    val = generate_forward_dynamics_dataset(robot, 300, rng)
-    with torch.no_grad():
-        q = torch.tensor(val["q"], dtype=torch.float64)
-        qdot = torch.tensor(val["qdot"], dtype=torch.float64)
-        tau = torch.tensor(val["tau"], dtype=torch.float64)
-        qddot_pred = result.model(q, qdot, tau).numpy()
-    qddot_true = val["qddot"]
-
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
-    fig.suptitle(f"Forward-dynamics PINN — {robot.name}", fontweight="bold")
-
-    axes[0].plot([h["iter"] for h in result.loss_history], [h["data"] for h in result.loss_history],
-                 label="train (data MSE)", lw=1.2)
-    axes[0].plot([h["iter"] for h in result.loss_history], [h["physics"] for h in result.loss_history],
-                 label="train (physics)", lw=0.8, alpha=0.45)
-    if result.val_history:
-        # Same units as the data loss, so divergence between the two is readable
-        # directly: while they track, the model generalizes; once the held-out
-        # curve turns up, further iterations are memorizing the training split.
-        axes[0].plot([h["iter"] for h in result.val_history], [h["val_mse"] for h in result.val_history],
-                     label="held-out MSE", lw=1.8, color="crimson")
-        best = result.best_iteration()
-        axes[0].axvline(best["iter"], color="crimson", ls=":", lw=1.2)
-        axes[0].annotate(f"best held-out\n@ {best['iter']}", xy=(best["iter"], best["val_rmse"] ** 2),
-                         xytext=(6, 12), textcoords="offset points", fontsize=8, color="crimson")
-    axes[0].set_yscale("log")
-    axes[0].set_xlabel("iteration")
-    axes[0].set_ylabel("MSE (log scale)")
-    axes[0].set_title("Training vs. held-out")
-    axes[0].legend(fontsize=8)
-    axes[0].grid(alpha=0.3)
-
-    axes[1].scatter(qddot_true.flatten(), qddot_pred.flatten(), s=4, alpha=0.3)
-    lo, hi = qddot_true.min(), qddot_true.max()
-    axes[1].plot([lo, hi], [lo, hi], "r--", lw=1, label="perfect prediction")
-    axes[1].set_xlabel("true q̈ [rad/s²]")
-    axes[1].set_ylabel("predicted q̈ [rad/s²]")
-    axes[1].set_title(f"Held-out accuracy (RMSE = {result.val_data_rmse:.3f} rad/s²)")
-    axes[1].legend()
-    axes[1].grid(alpha=0.3)
-
-    fig.tight_layout()
-    fig_path = OUTPUT_DIR / f"forward_dynamics_{robot.name}.png"
-    fig.savefig(fig_path, dpi=130, bbox_inches="tight")
-    print(f"Saved figure: {fig_path}")
-
     metrics = forward_dynamics_metrics(result.model, robot, n_samples=500,
                                        rng=np.random.default_rng(args.seed + 2))
     print(format_metrics(metrics, "Forward-dynamics metrics (held-out)"))
+
+    figures = forward_dynamics_figures(result, robot, metrics,
+                                       rng=np.random.default_rng(args.seed + 3))
+    fig_paths = save_figures(figures, OUTPUT_DIR, "forward_dynamics", robot.name)
+    for fp in fig_paths:
+        print(f"Saved figure: {fp}")
 
     report = training_report(
         title=f"Forward-dynamics PINN — {robot.name}",
@@ -114,7 +70,7 @@ def main():
                 "depth": args.depth, "architecture": type(result.model.net).__name__,
                 "seed": args.seed},
         metrics=metrics, history=result.loss_history,
-        figure=str(fig_path.name), checkpoint=str(checkpoint_path.name),
+        figure=[p.name for p in fig_paths], checkpoint=str(checkpoint_path.name),
         notes=review_forward_dynamics(metrics),
     )
     path = write_report(report_path(OUTPUT_DIR, "forward_dynamics", robot.name), report)

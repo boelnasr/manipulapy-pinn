@@ -14,13 +14,13 @@ import matplotlib
 
 if "MPLBACKEND" not in os.environ:
     matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 
 from manipulapy_pinn import load_robot
 from manipulapy_pinn.forward_dynamics import train as train_dynamics
 from manipulapy_pinn.metrics import format_metrics, trajectory_metrics
 from manipulapy_pinn.models import hidden_sizes
+from manipulapy_pinn.plots import save_figures, trajectory_figures
 from manipulapy_pinn.report import report_path, review_trajectory, training_report, write_report
 from manipulapy_pinn.trajectory import solve
 
@@ -66,46 +66,6 @@ def main():
         torque_hidden=hidden_sizes(args.trajectory_width, args.trajectory_depth),
     )
 
-    sample = traj_result.sample(200)
-    n = robot.n_joints
-
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
-    fig.suptitle(f"Trajectory PINN — {robot.name} "
-                 f"(surrogate held-out q̈ RMSE = {dyn_result.val_data_rmse:.3f} rad/s²)", fontweight="bold")
-
-    for j in range(n):
-        axes[0, 0].plot(sample["t"], sample["q"][:, j], label=f"q{j+1}")
-    axes[0, 0].set_title("Joint positions q(t)")
-    axes[0, 0].set_xlabel("t (normalized)")
-    axes[0, 0].legend(fontsize=7, ncol=2)
-    axes[0, 0].grid(alpha=0.3)
-
-    for j in range(n):
-        axes[0, 1].plot(sample["t"], sample["qdot"][:, j])
-    axes[0, 1].axhline(0, color="gray", lw=0.8)
-    axes[0, 1].set_title("Joint velocities q̇(t) — should be ~0 at both ends")
-    axes[0, 1].set_xlabel("t (normalized)")
-    axes[0, 1].grid(alpha=0.3)
-
-    for j in range(n):
-        axes[1, 0].plot(sample["t"], sample["tau"][:, j])
-    axes[1, 0].set_title("Commanded torque τ(t)")
-    axes[1, 0].set_xlabel("t (normalized)")
-    axes[1, 0].grid(alpha=0.3)
-
-    axes[1, 1].plot([h["iter"] for h in traj_result.loss_history], [h["physics"] for h in traj_result.loss_history], label="physics (EOM) residual")
-    axes[1, 1].plot([h["iter"] for h in traj_result.loss_history], [h["boundary"] for h in traj_result.loss_history], label="boundary velocity")
-    axes[1, 1].set_yscale("log")
-    axes[1, 1].set_title("Trajectory-solve convergence")
-    axes[1, 1].set_xlabel("iteration")
-    axes[1, 1].legend(fontsize=8)
-    axes[1, 1].grid(alpha=0.3)
-
-    fig.tight_layout()
-    fig_path = OUTPUT_DIR / f"trajectory_{robot.name}.png"
-    fig.savefig(fig_path, dpi=130, bbox_inches="tight")
-    print(f"\nSaved figure: {fig_path}")
-
     # Scored against ManipulaPy's *true* inverse dynamics, not the surrogate the
     # solve optimized through — see metrics.trajectory_metrics for why that
     # distinction is the whole point of evaluating this task.
@@ -113,6 +73,11 @@ def main():
                                  n_collocation_trained=args.collocation_points)
     metrics["surrogate_val_rmse_rad_s2"] = dyn_result.val_data_rmse
     print(format_metrics(metrics, "Trajectory metrics (vs. ManipulaPy inverse dynamics)"))
+
+    figures = trajectory_figures(traj_result, robot, metrics, n_points=200)
+    fig_paths = save_figures(figures, OUTPUT_DIR, "trajectory", robot.name)
+    for fp in fig_paths:
+        print(f"Saved figure: {fp}")
 
     report = training_report(
         title=f"Trajectory PINN — {robot.name}",
@@ -126,7 +91,7 @@ def main():
                 "trajectory_depth": args.trajectory_depth, "seed": args.seed,
                 "q_start": np.round(q_start, 4), "q_goal": np.round(q_goal, 4)},
         metrics=metrics, history=traj_result.loss_history,
-        figure=str(fig_path.name),
+        figure=[p.name for p in fig_paths],
         notes=review_trajectory(metrics),
     )
     path = write_report(report_path(OUTPUT_DIR, "trajectory", robot.name), report)

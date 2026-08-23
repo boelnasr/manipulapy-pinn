@@ -13,16 +13,14 @@ import matplotlib
 
 if "MPLBACKEND" not in os.environ:
     matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
 from manipulapy_pinn import load_robot
-from manipulapy_pinn.backend_utils import torch_context
 from manipulapy_pinn.inverse_kinematics import train
 from manipulapy_pinn.metrics import format_metrics, inverse_kinematics_metrics
 from manipulapy_pinn.models import hidden_sizes
-from manipulapy_pinn.physics import fk_position_residual
+from manipulapy_pinn.plots import inverse_kinematics_figures, save_figures
 from manipulapy_pinn.report import report_path, review_inverse_kinematics, training_report, write_report
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "runs"
@@ -51,43 +49,15 @@ def main():
     torch.save(result.model.state_dict(), checkpoint_path)
     print(f"Saved checkpoint: {checkpoint_path}")
 
-    # Held-out reach-error distribution over a fresh batch of targets.
-    rng = np.random.default_rng(args.seed + 1)
-    q_val = robot.sample_configurations(300, rng)
-    target_val = torch.tensor(robot.forward_kinematics(q_val)[:, :3, 3], dtype=torch.float64)
-    with torch.no_grad():
-        q_pred = result.model(target_val)
-        with torch_context():
-            residual = fk_position_residual(robot.serial, q_pred, target_val)
-    reach_error_mm = residual.norm(dim=-1).numpy() * 1000
-
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
-    fig.suptitle(f"Inverse-kinematics PINN — {robot.name}", fontweight="bold")
-
-    axes[0].plot([h["iter"] for h in result.loss_history], [h["loss"] for h in result.loss_history])
-    axes[0].set_yscale("log")
-    axes[0].set_xlabel("iteration")
-    axes[0].set_ylabel("FK-residual MSE (log scale)")
-    axes[0].set_title("Training curve")
-    axes[0].grid(alpha=0.3)
-
-    axes[1].hist(reach_error_mm, bins=30, color="steelblue", alpha=0.85)
-    axes[1].axvline(reach_error_mm.mean(), color="crimson", linestyle="--",
-                     label=f"mean = {reach_error_mm.mean():.0f} mm")
-    axes[1].set_xlabel("reach error [mm]")
-    axes[1].set_ylabel("count")
-    axes[1].set_title(f"Held-out reach error (n={len(reach_error_mm)})")
-    axes[1].legend()
-    axes[1].grid(alpha=0.3)
-
-    fig.tight_layout()
-    fig_path = OUTPUT_DIR / f"inverse_kinematics_{robot.name}.png"
-    fig.savefig(fig_path, dpi=130, bbox_inches="tight")
-    print(f"Saved figure: {fig_path}")
-
     metrics = inverse_kinematics_metrics(result.model, robot, n_targets=300,
                                          rng=np.random.default_rng(args.seed + 2))
     print(format_metrics(metrics, "Inverse-kinematics metrics (held-out)"))
+
+    figures = inverse_kinematics_figures(result, robot, metrics,
+                                         rng=np.random.default_rng(args.seed + 3))
+    fig_paths = save_figures(figures, OUTPUT_DIR, "inverse_kinematics", robot.name)
+    for fp in fig_paths:
+        print(f"Saved figure: {fp}")
 
     report = training_report(
         title=f"Inverse-kinematics PINN — {robot.name}",
@@ -96,7 +66,7 @@ def main():
                 "width": args.width, "depth": args.depth,
                 "architecture": type(result.model.net).__name__, "seed": args.seed},
         metrics=metrics, history=result.loss_history,
-        figure=str(fig_path.name), checkpoint=str(checkpoint_path.name),
+        figure=[p.name for p in fig_paths], checkpoint=str(checkpoint_path.name),
         notes=review_inverse_kinematics(metrics),
     )
     path = write_report(report_path(OUTPUT_DIR, "inverse_kinematics", robot.name), report)
