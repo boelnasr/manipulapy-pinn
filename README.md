@@ -224,6 +224,44 @@ with ManipulaPy's classical solvers directly.
   — more samples, more iterations, and a wider network all still improve
   held-out RMSE at the point this was written.
 
+## Choosing samples and iterations together
+
+These two are not independent, and tuning one against the wrong value of the
+other is the easiest way to get a worse model. Measured on `panda`, held-out
+q̈ RMSE, two seeds per cell:
+
+| samples | 1500 iters | 4000 iters | 8000 iters | 12000 iters |
+|---:|---:|---:|---:|---:|
+| 2000 | **3.15** | 3.26 | — | — |
+| 8000 | — | 1.77 | 1.59 | **1.51** |
+
+Read it in both directions. At **2000 samples**, going from 1500 to 4000
+iterations makes the model *worse* — held-out error bottoms around iteration
+1000 and rises from there while the training loss keeps falling. At **8000
+samples** the same extra iterations keep helping, and at 12000 the held-out
+curve is still descending with a train/val gap of only 1.36×.
+
+So the rule is: **raise samples first, then iterations.** More steps on too
+little data is not a slower path to the same place — it is a worse model.
+
+```bash
+python scripts/train_forward_dynamics.py --samples 8000 --iterations 12000
+```
+
+Every run now plots held-out error next to the training loss and marks the
+best iteration, so you can read the crossover for your own configuration
+rather than trusting this table. If the best iteration lands well before the
+end of your run, training prints a warning saying so.
+
+### Depth
+
+`--depth` above 4 switches from a plain stack to residual blocks
+automatically. Depth pays off only when the budget is there to use it: at
+3000 samples / 3000 iterations, depth 5 beat depth 3 (2.56 vs 2.71), but at
+the default 2000 samples / 1500 iterations the two are indistinguishable
+while depth 5 costs about twice the training time. The defaults are therefore
+shallow, and depth is a knob rather than a default.
+
 ## Evaluating a trained model
 
 Every `train_*.py` script scores its model after training and writes a

@@ -48,7 +48,7 @@ class ForwardDynamicsPINN(torch.nn.Module):
     def __init__(
         self,
         n_joints: int,
-        hidden=(128,) * 5,
+        hidden=(128, 128, 128),
         input_mean: torch.Tensor = None,
         input_std: torch.Tensor = None,
         output_mean: torch.Tensor = None,
@@ -99,20 +99,20 @@ def train(
     data_weight: float = 1.0,
     physics_weight: float = 1.0,
     val_fraction: float = 0.15,
-    # Five layers, which build_mlp turns into residual blocks. Measured on panda
-    # over 3000 samples at a fixed 3000-iteration budget, held-out q-ddot RMSE:
+    # Three layers. Depth 5 measured better at 3000 samples / 3000 iterations
+    # (2.557 vs 2.711), but at the DEFAULT budget below it is a wash while
+    # costing roughly twice the training time -- 2000 samples, 1500 iterations,
+    # two seeds each:
     #
-    #            plain    residual
-    #   depth 3  2.711    2.633
-    #   depth 5  2.762    2.557   <- best
-    #   depth 8  2.957    2.798
-    #   depth 12 3.017    2.831
+    #             1500 iters      4000 iters
+    #   depth 3   3.147 / 3.206   3.252 / 3.277
+    #   depth 5   3.145 / 3.163   3.281 / 3.316
     #
-    # Residual wins at every depth, and it reverses the direction of the trend
-    # from 3 to 5 layers: the plain stack gets worse where the residual one
-    # improves. Both still degrade past 5, so the skips make depth usable
-    # rather than unconditionally good.
-    hidden=(128,) * 5,
+    # Note the columns as well as the rows: at 2000 samples, MORE iterations
+    # make both depths worse. Depth and budget have to be raised together, so
+    # the shipped default stays shallow and `--depth 5` is there for when the
+    # sample count justifies it. See the pairing table in the README.
+    hidden=(128, 128, 128),
     seed: int = 0,
     log_every: int = 200,
     val_every: int = 100,
