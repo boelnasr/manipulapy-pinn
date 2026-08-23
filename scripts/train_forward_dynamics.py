@@ -66,13 +66,25 @@ def main():
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
     fig.suptitle(f"Forward-dynamics PINN — {robot.name}", fontweight="bold")
 
-    axes[0].plot([h["iter"] for h in result.loss_history], [h["data"] for h in result.loss_history], label="data loss")
-    axes[0].plot([h["iter"] for h in result.loss_history], [h["physics"] for h in result.loss_history], label="physics loss")
+    axes[0].plot([h["iter"] for h in result.loss_history], [h["data"] for h in result.loss_history],
+                 label="train (data MSE)", lw=1.2)
+    axes[0].plot([h["iter"] for h in result.loss_history], [h["physics"] for h in result.loss_history],
+                 label="train (physics)", lw=0.8, alpha=0.45)
+    if result.val_history:
+        # Same units as the data loss, so divergence between the two is readable
+        # directly: while they track, the model generalizes; once the held-out
+        # curve turns up, further iterations are memorizing the training split.
+        axes[0].plot([h["iter"] for h in result.val_history], [h["val_mse"] for h in result.val_history],
+                     label="held-out MSE", lw=1.8, color="crimson")
+        best = result.best_iteration()
+        axes[0].axvline(best["iter"], color="crimson", ls=":", lw=1.2)
+        axes[0].annotate(f"best held-out\n@ {best['iter']}", xy=(best["iter"], best["val_rmse"] ** 2),
+                         xytext=(6, 12), textcoords="offset points", fontsize=8, color="crimson")
     axes[0].set_yscale("log")
     axes[0].set_xlabel("iteration")
-    axes[0].set_ylabel("loss (log scale)")
-    axes[0].set_title("Training curves")
-    axes[0].legend()
+    axes[0].set_ylabel("MSE (log scale)")
+    axes[0].set_title("Training vs. held-out")
+    axes[0].legend(fontsize=8)
     axes[0].grid(alpha=0.3)
 
     axes[1].scatter(qddot_true.flatten(), qddot_pred.flatten(), s=4, alpha=0.3)
@@ -97,6 +109,7 @@ def main():
         title=f"Forward-dynamics PINN — {robot.name}",
         robot_name=robot.name, n_joints=robot.n_joints,
         config={"task": "forward_dynamics", "samples": args.samples,
+                "best_val_iteration": result.best_iteration().get("iter"),
                 "iterations": args.iterations, "width": args.width,
                 "depth": args.depth, "architecture": type(result.model.net).__name__,
                 "seed": args.seed},

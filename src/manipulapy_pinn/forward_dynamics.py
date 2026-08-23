@@ -75,7 +75,20 @@ class ForwardDynamicsPINN(torch.nn.Module):
 class ForwardDynamicsResult:
     model: ForwardDynamicsPINN
     loss_history: List[dict] = field(default_factory=list)
+    #: Held-out error sampled periodically during training: one dict per check
+    #: with ``iter``, ``val_mse`` and ``val_rmse``. The training loss alone
+    #: cannot tell you when to stop — it keeps falling while the model
+    #: memorizes — so the useful signal is where this curve turns back up.
+    val_history: List[dict] = field(default_factory=list)
     val_data_rmse: float = float("nan")
+
+    def best_iteration(self) -> dict:
+        """The recorded checkpoint with the lowest held-out error.
+
+        If this is far from the last entry, the run trained past its own
+        optimum and the extra iterations did harm rather than nothing.
+        """
+        return min(self.val_history, key=lambda h: h["val_rmse"]) if self.val_history else {}
 
 
 def train(
@@ -102,6 +115,7 @@ def train(
     hidden=(128,) * 5,
     seed: int = 0,
     log_every: int = 200,
+    val_every: int = 100,
     verbose: bool = True,
 ) -> ForwardDynamicsResult:
     # Seed torch as well as NumPy: NumPy alone controls the sampled states, but
@@ -128,7 +142,12 @@ def train(
         output_mean=output_mean, output_std=output_std,
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    history = []
+    history, val_history = [], []
+
+    q_v = torch.tensor(val_data["q"], dtype=torch.float64)
+    qdot_v = torch.tensor(val_data["qdot"], dtype=torch.float64)
+    tau_v = torch.tensor(val_data["tau"], dtype=torch.float64)
+    qddot_v = torch.tensor(val_data["qddot"], dtype=torch.float64)
 
     if verbose:
         print(f"   Training forward-dynamics PINN on {robot.name} "
@@ -144,19 +163,31 @@ def train(
         loss.backward()
         optimizer.step()
         history.append({"iter": it, "loss": loss.item(), "data": data_loss.item(), "physics": physics_loss.item()})
+
+        # Sampled on the held-out split, in the same units as the data loss, so
+        # the two curves can be read on one axis: they track together while the
+        # model generalizes and separate once it starts memorizing.
+        if val_every and (it % val_every == 0 or it == iterations - 1):
+            with torch.no_grad():
+                val_mse = (model(q_v, qdot_v, tau_v) - qddot_v).pow(2).mean().item()
+            val_history.append({"iter": it, "val_mse": val_mse, "val_rmse": val_mse ** 0.5})
+
         if verbose and (it % log_every == 0 or it == iterations - 1):
             print(f"     step {it:5d}   loss={loss.item():.5f}  data={data_loss.item():.5f}  "
                   f"physics={physics_loss.item():.5f}")
     elapsed = time.time() - start
 
     with torch.no_grad():
-        q_v = torch.tensor(val_data["q"], dtype=torch.float64)
-        qdot_v = torch.tensor(val_data["qdot"], dtype=torch.float64)
-        tau_v = torch.tensor(val_data["tau"], dtype=torch.float64)
-        qddot_v = torch.tensor(val_data["qddot"], dtype=torch.float64)
         val_rmse = (model(q_v, qdot_v, tau_v) - qddot_v).pow(2).mean().sqrt().item()
 
     if verbose:
         print(f"   ✅ Trained in {elapsed:.1f}s — held-out q̈ RMSE = {val_rmse:.4f} rad/s²")
+        if val_history:
+            best = min(val_history, key=lambda h: h["val_rmse"])
+            if best["iter"] < 0.8 * (iterations - 1):
+                print(f"   ⚠️  Best held-out error was {best['val_rmse']:.4f} at iteration "
+                      f"{best['iter']} — the last {iterations - 1 - best['iter']} iterations "
+                      f"made it worse. Train on more samples rather than for longer.")
 
-    return ForwardDynamicsResult(model=model, loss_history=history, val_data_rmse=val_rmse)
+    return ForwardDynamicsResult(model=model, loss_history=history,
+                                 val_history=val_history, val_data_rmse=val_rmse)
