@@ -235,6 +235,10 @@ q̈ RMSE, two seeds per cell:
 | 2000 | **3.15** | 3.26 | — | — |
 | 8000 | — | 1.77 | 1.59 | **1.51** |
 
+At 8000 samples the held-out curve is still descending at 12000 iterations, so
+that column is a floor rather than an optimum — there is more to gain by
+running longer.
+
 Read it in both directions. At **2000 samples**, going from 1500 to 4000
 iterations makes the model *worse* — held-out error bottoms around iteration
 1000 and rises from there while the training loss keeps falling. At **8000
@@ -256,11 +260,32 @@ end of your run, training prints a warning saying so.
 ### Depth
 
 `--depth` above 4 switches from a plain stack to residual blocks
-automatically. Depth pays off only when the budget is there to use it: at
-3000 samples / 3000 iterations, depth 5 beat depth 3 (2.56 vs 2.71), but at
-the default 2000 samples / 1500 iterations the two are indistinguishable
-while depth 5 costs about twice the training time. The defaults are therefore
-shallow, and depth is a knob rather than a default.
+automatically. At 8000 samples, held-out RMSE with the train/val gap in
+brackets:
+
+| iterations | depth 3 | depth 5 |
+|---:|---:|---:|
+| 2000 | 2.042 (1.14×) | **1.778** (1.28×) |
+| 4000 | 1.772 (1.20×) | 1.628 (1.44×) |
+| 8000 | 1.591 (1.29×) | 1.541 (1.71×) |
+| 12000 | **1.513** (1.36×) | 1.529 (2.02×) |
+
+Depth buys **convergence speed, not final accuracy**. Depth 5 reaches in 2000
+iterations roughly what depth 3 needs 4000 to reach — but by 12000 they meet,
+and depth 3 edges ahead. Since depth 5 costs about twice as much per
+iteration, that early advantage is spent paying for it.
+
+The gap column shows why they meet: depth 5's train/val gap grows to 2.02×
+while depth 3 stays at 1.36×. The deeper network spends its extra capacity
+memorizing. Its held-out curve has already flattened by 12000 (1.541 → 1.529)
+where depth 3's is still descending (1.591 → 1.513).
+
+So forward dynamics defaults to depth 3. **Inverse kinematics defaults to
+depth 5**, where the same comparison comes out the other way (92.7 mm → 57.0
+mm at its default budget) — that task draws fresh targets every step, so
+there is no fixed set to memorize and extra capacity goes into the map
+itself. Same architecture, opposite verdict, decided by whether the data is
+finite.
 
 ## Evaluating a trained model
 
