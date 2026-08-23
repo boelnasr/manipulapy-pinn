@@ -86,6 +86,10 @@ class ForwardDynamicsResult:
     #: RMSE on the *eval* split, which nothing during training ever looked at.
     #: This is the number to quote.
     eval_rmse: float = float("nan")
+    #: The actual ``{"train": …, "test": …, "eval": …}`` data the run used, kept
+    #: so the full metric suite can be scored per split afterwards rather than
+    #: on a fresh draw that no part of training ever saw.
+    splits: dict = field(default_factory=dict)
 
     @property
     def val_data_rmse(self) -> float:
@@ -206,4 +210,6 @@ def train(
 
     return ForwardDynamicsResult(model=model, loss_history=history,
                                  val_history=val_history,
-                                 test_rmse=test_rmse, eval_rmse=eval_rmse)
+                                 test_rmse=test_rmse, eval_rmse=eval_rmse,
+                                 splits={"train": train_data, "test": test_data,
+                                         "eval": eval_data})

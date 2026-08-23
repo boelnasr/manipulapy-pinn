@@ -18,9 +18,11 @@ import torch
 
 from manipulapy_pinn import load_robot
 from manipulapy_pinn.forward_dynamics import train
-from manipulapy_pinn.metrics import format_metrics, forward_dynamics_metrics
+from manipulapy_pinn.metrics import (format_metrics, forward_dynamics_metrics,
+                                     forward_dynamics_split_metrics)
 from manipulapy_pinn.models import hidden_sizes
-from manipulapy_pinn.plots import forward_dynamics_figures, save_figures
+from manipulapy_pinn.plots import (forward_dynamics_figures, save_figures,
+                                   split_comparison_figure)
 from manipulapy_pinn.report import report_path, review_forward_dynamics, training_report, write_report
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "runs"
@@ -55,8 +57,22 @@ def main():
                                        rng=np.random.default_rng(args.seed + 2))
     print(format_metrics(metrics, "Forward-dynamics metrics (held-out)"))
 
+    # Score the run's actual splits, not a fresh draw: this is what makes the
+    # train/test/eval comparison mean anything.
+    split_metrics = forward_dynamics_split_metrics(result.model, robot, result.splits)
+    print("\nPer-split metrics")
+    print("-" * 62)
+    print(f"  {'split':<8}{'n':>6}{'rmse':>10}{'mae':>10}{'r2':>9}{'skill':>9}")
+    for name in ("train", "test", "eval"):
+        m = split_metrics[name]
+        print(f"  {name:<8}{m['n_samples']:>6}{m['rmse_rad_s2']:>10.4f}"
+              f"{m['mae_rad_s2']:>10.4f}{m['r2']:>9.4f}{m['skill_score']:>9.4f}")
+    for k, v in split_metrics["gaps"].items():
+        print(f"  {k:<28}{v:>8.3f}")
+
     figures = forward_dynamics_figures(result, robot, metrics,
                                        rng=np.random.default_rng(args.seed + 3))
+    figures["split_comparison"] = split_comparison_figure(split_metrics, robot.n_joints)
     fig_paths = save_figures(figures, OUTPUT_DIR, "forward_dynamics", robot.name)
     for fp in fig_paths:
         print(f"Saved figure: {fp}")
@@ -69,6 +85,7 @@ def main():
                 "split_train_test_eval": "70/20/10",
                 "test_rmse_rad_s2": result.test_rmse,
                 "eval_rmse_rad_s2": result.eval_rmse,
+                **{f"gap_{k}": v for k, v in split_metrics["gaps"].items()},
                 "iterations": args.iterations, "width": args.width,
                 "depth": args.depth, "architecture": type(result.model.net).__name__,
                 "seed": args.seed},

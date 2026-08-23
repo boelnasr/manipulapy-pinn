@@ -38,9 +38,15 @@ def _r2(true: np.ndarray, pred: np.ndarray) -> float:
 
 
 def forward_dynamics_metrics(
-    model, robot: RobotModel, n_samples: int = 500, rng: np.random.Generator = None
+    model, robot: RobotModel, n_samples: int = 500, rng: np.random.Generator = None,
+    data: Dict[str, np.ndarray] = None,
 ) -> Dict:
-    """Evaluate a :class:`ForwardDynamicsPINN` on freshly sampled states.
+    """Evaluate a :class:`ForwardDynamicsPINN`.
+
+    Pass ``data`` to score one of the run's actual splits; omit it to sample
+    ``n_samples`` fresh states instead. Scoring the real splits is what makes
+    the train / test / eval comparison meaningful — a fresh draw is a fourth,
+    independent set, which answers a different question.
 
     Beyond plain RMSE this reports:
 
@@ -59,8 +65,10 @@ def forward_dynamics_metrics(
       is actually commanded in, and it weights each joint by its inertia
       rather than treating a rad/s² of the wrist as equal to one of the base.
     """
-    rng = rng if rng is not None else np.random.default_rng(0)
-    data = generate_forward_dynamics_dataset(robot, n_samples, rng)
+    if data is None:
+        rng = rng if rng is not None else np.random.default_rng(0)
+        data = generate_forward_dynamics_dataset(robot, n_samples, rng)
+    n_samples = len(data["q"])
 
     with torch.no_grad():
         pred = model(
@@ -95,6 +103,36 @@ def forward_dynamics_metrics(
         "torque_rmse_Nm": float(np.sqrt((torque_err ** 2).mean())),
         "torque_max_abs_Nm": float(np.abs(torque_err).max()),
     }
+
+
+def forward_dynamics_split_metrics(model, robot: RobotModel, splits: Dict) -> Dict:
+    """Score the model on every split it was trained with.
+
+    Returns ``{split_name: metrics}`` plus a ``gaps`` entry holding the ratios
+    that matter for reading generalization:
+
+    - ``test_over_train`` and ``eval_over_train`` — how much worse the model is
+      on data it did not fit. Near 1.0 means it generalizes; a large ratio means
+      it memorized.
+    - ``eval_over_test`` — the honest-vs-optimistic gap. The test split chose
+      when to stop, so it flatters the model slightly; how much is exactly this
+      number, and it is the reason both are reported rather than just one.
+    """
+    per_split = {name: forward_dynamics_metrics(model, robot, data=data)
+                 for name, data in splits.items()}
+    train_rmse = per_split.get("train", {}).get("rmse_rad_s2")
+    test_rmse = per_split.get("test", {}).get("rmse_rad_s2")
+    eval_rmse = per_split.get("eval", {}).get("rmse_rad_s2")
+
+    def ratio(a, b):
+        return float(a / b) if a is not None and b else float("nan")
+
+    per_split["gaps"] = {
+        "test_over_train": ratio(test_rmse, train_rmse),
+        "eval_over_train": ratio(eval_rmse, train_rmse),
+        "eval_over_test": ratio(eval_rmse, test_rmse),
+    }
+    return per_split
 
 
 def inverse_kinematics_metrics(

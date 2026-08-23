@@ -169,3 +169,34 @@ def test_training_report_renders_and_writes(tmp_path, robot, fd_result, rng):
 def test_format_metrics_handles_arrays_and_scalars():
     out = format_metrics({"a": 1.5, "b": np.array([1.0, 2.0]), "c": 7}, "T")
     assert "T" in out and "1.5" in out and "1.000, 2.000" in out and "7" in out
+
+
+def test_split_metrics_score_the_real_splits(robot, fd_result):
+    """Per-split metrics use the run's own data, not a fresh draw."""
+    from manipulapy_pinn.metrics import forward_dynamics_split_metrics
+
+    assert set(fd_result.splits) == {"train", "test", "eval"}
+    sm = forward_dynamics_split_metrics(fd_result.model, robot, fd_result.splits)
+
+    for name in ("train", "test", "eval"):
+        assert sm[name]["n_samples"] == len(fd_result.splits[name]["q"]), \
+            "metrics were computed on a different set than the split"
+        assert np.isfinite(sm[name]["rmse_rad_s2"])
+
+    gaps = sm["gaps"]
+    assert gaps["test_over_train"] == pytest.approx(
+        sm["test"]["rmse_rad_s2"] / sm["train"]["rmse_rad_s2"], rel=1e-9)
+    assert gaps["eval_over_test"] == pytest.approx(
+        sm["eval"]["rmse_rad_s2"] / sm["test"]["rmse_rad_s2"], rel=1e-9)
+
+
+def test_metrics_accept_explicit_data(robot, fd_result, rng):
+    """Passing `data` scores that set; omitting it samples a fresh one."""
+    from manipulapy_pinn.metrics import forward_dynamics_metrics
+
+    on_eval = forward_dynamics_metrics(fd_result.model, robot, data=fd_result.splits["eval"])
+    again = forward_dynamics_metrics(fd_result.model, robot, data=fd_result.splits["eval"])
+    assert on_eval["rmse_rad_s2"] == again["rmse_rad_s2"], "scoring a fixed set must be deterministic"
+
+    fresh = forward_dynamics_metrics(fd_result.model, robot, n_samples=30, rng=rng)
+    assert fresh["n_samples"] == 30

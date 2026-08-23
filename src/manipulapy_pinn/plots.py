@@ -135,6 +135,78 @@ def _stat_tiles(ax, items, title):
                 fontsize=8, color=REF_C, va="bottom", ha="right")
 
 
+
+#: Categorical hues for the three data splits, in fixed order and never cycled.
+#: Validated with the dataviz palette checker: worst adjacent pair ΔE 13.5
+#: (deutan) and 29.9 (normal vision), chroma floor and contrast both passing.
+#: Two plausible-looking alternatives failed CVD separation at ΔE 2.9 and 5.9 —
+#: indistinguishable to a deuteranope — which is why this is measured, not
+#: chosen by eye.
+SPLIT_COLORS = {"train": "#0077BB", "test": "#CC3311", "eval": "#009988"}
+SPLIT_ORDER = ("train", "test", "eval")
+
+
+def split_comparison_figure(split_metrics: Dict, n_joints: int) -> plt.Figure:
+    """Train vs. test vs. eval on the same metrics — the generalization picture.
+
+    Four panels rather than one grouped chart, because the metrics do not share
+    a unit: error in rad/s², the scale-free scores, per-joint error, and the
+    ratios between splits each get their own axis.
+    """
+    present = [k for k in SPLIT_ORDER if k in split_metrics]
+    colors = [SPLIT_COLORS[k] for k in present]
+    x = np.arange(len(present))
+
+    fig, ax = plt.subplots(2, 2, figsize=(12, 8))
+
+    # --- error in physical units ---
+    rmse = [split_metrics[k]["rmse_rad_s2"] for k in present]
+    mae = [split_metrics[k]["mae_rad_s2"] for k in present]
+    ax[0, 0].bar(x - 0.19, rmse, width=0.36, color=colors, label="RMSE")
+    ax[0, 0].bar(x + 0.19, mae, width=0.36, color=colors, alpha=0.5, label="MAE")
+    for xi, v in zip(x, rmse):
+        ax[0, 0].text(xi - 0.19, v, f"{v:.3f}", ha="center", va="bottom", fontsize=8)
+    ax[0, 0].set_xticks(x, [f"{k}\n(n={split_metrics[k]['n_samples']})" for k in present])
+    _finish(ax[0, 0], "split", "error  [rad/s²]", "Error by split — solid RMSE, faded MAE")
+
+    # --- scale-free scores, both bounded above by 1 ---
+    r2 = [split_metrics[k]["r2"] for k in present]
+    skill = [split_metrics[k]["skill_score"] for k in present]
+    ax[0, 1].bar(x - 0.19, r2, width=0.36, color=colors, label="R²")
+    ax[0, 1].bar(x + 0.19, skill, width=0.36, color=colors, alpha=0.5, label="skill score")
+    ax[0, 1].axhline(0.9, color=REF_C, ls="--", lw=1.1, label="R² threshold 0.9")
+    ax[0, 1].axhline(0.5, color=REF_C, ls=":", lw=1.1, label="skill threshold 0.5")
+    ax[0, 1].set_xticks(x, present)
+    ax[0, 1].set_ylim(0, 1.05)
+    _finish(ax[0, 1], "split", "score  [dimensionless]", "Scale-free scores by split")
+
+    # --- per joint, so a split-wide gap can be traced to specific joints ---
+    j = np.arange(n_joints)
+    width = 0.8 / len(present)
+    for i, k in enumerate(present):
+        ax[1, 0].bar(j + (i - (len(present) - 1) / 2) * width,
+                     split_metrics[k]["per_joint_rmse_rad_s2"], width=width,
+                     color=SPLIT_COLORS[k], label=k)
+    ax[1, 0].set_xticks(j, [f"q{i+1}" for i in j])
+    _finish(ax[1, 0], "joint", "RMSE  [rad/s²]", "Per-joint error by split")
+
+    # --- the ratios that actually answer "did it generalize" ---
+    gaps = split_metrics.get("gaps", {})
+    labels = [k for k in ("test_over_train", "eval_over_train", "eval_over_test") if k in gaps]
+    values = [gaps[k] for k in labels]
+    bar_colors = [OK_C if v <= 1.25 else BAD_C for v in values]
+    ax[1, 1].bar(range(len(labels)), values, color=bar_colors, width=0.55)
+    ax[1, 1].axhline(1.0, color=REF_C, ls="--", lw=1.4, label="no gap")
+    for xi, v in enumerate(values):
+        ax[1, 1].text(xi, v, f"{v:.3f}", ha="center", va="bottom", fontsize=9)
+    ax[1, 1].set_xticks(range(len(labels)), [l.replace("_over_", " / ") for l in labels], fontsize=8)
+    _finish(ax[1, 1], "", "ratio of RMSE  [dimensionless]",
+            "Generalization gaps\n(eval/test above 1 means the test split flattered the model)")
+
+    fig.tight_layout()
+    return fig
+
+
 # --------------------------------------------------------------------------
 # Forward dynamics
 # --------------------------------------------------------------------------
