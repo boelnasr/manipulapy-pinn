@@ -71,7 +71,7 @@ def main():
     # distinction is the whole point of evaluating this task.
     metrics = trajectory_metrics(traj_result, robot, n_points=200,
                                  n_collocation_trained=args.collocation_points)
-    metrics["surrogate_val_rmse_rad_s2"] = dyn_result.val_data_rmse
+    metrics["surrogate_eval_rmse_rad_s2"] = dyn_result.eval_rmse
     print(format_metrics(metrics, "Trajectory metrics (vs. ManipulaPy inverse dynamics)"))
 
     figures = trajectory_figures(traj_result, robot, metrics, n_points=200)

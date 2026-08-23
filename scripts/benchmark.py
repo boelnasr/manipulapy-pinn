@@ -41,7 +41,7 @@ def benchmark_forward_dynamics(robot, rng):
     print("=" * 72)
 
     result = train_dynamics(robot, n_samples=2000, iterations=1500, verbose=False)
-    print(f"PINN held-out RMSE: {result.val_data_rmse:.4f} rad/s²")
+    print(f"PINN eval-split RMSE: {result.eval_rmse:.4f} rad/s²")
 
     q = robot.sample_configurations(1, rng)[0]
     qdot = rng.uniform(-1, 1, robot.n_joints)

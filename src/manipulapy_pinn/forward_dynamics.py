@@ -27,7 +27,7 @@ from typing import List
 import numpy as np
 import torch
 
-from .data import generate_forward_dynamics_dataset, train_val_split
+from .data import DEFAULT_SPLIT, generate_forward_dynamics_dataset, split_dataset
 from .models import build_mlp
 from .physics import eom_residual, precompute_dynamics_operators
 from .robots import RobotModel
@@ -80,7 +80,17 @@ class ForwardDynamicsResult:
     #: cannot tell you when to stop — it keeps falling while the model
     #: memorizes — so the useful signal is where this curve turns back up.
     val_history: List[dict] = field(default_factory=list)
-    val_data_rmse: float = float("nan")
+    #: RMSE on the *test* split — the one monitored during training. Because it
+    #: selected the best iteration, it is mildly optimistic.
+    test_rmse: float = float("nan")
+    #: RMSE on the *eval* split, which nothing during training ever looked at.
+    #: This is the number to quote.
+    eval_rmse: float = float("nan")
+
+    @property
+    def val_data_rmse(self) -> float:
+        """Backwards-compatible alias for :attr:`eval_rmse`."""
+        return self.eval_rmse
 
     def best_iteration(self) -> dict:
         """The recorded checkpoint with the lowest held-out error.
@@ -98,7 +108,7 @@ def train(
     lr: float = 1e-3,
     data_weight: float = 1.0,
     physics_weight: float = 1.0,
-    val_fraction: float = 0.15,
+    split=DEFAULT_SPLIT,
     # Three layers. Depth 5 measured better at 3000 samples / 3000 iterations
     # (2.557 vs 2.711), but at the DEFAULT budget below it is a wash while
     # costing roughly twice the training time -- 2000 samples, 1500 iterations,
@@ -124,7 +134,7 @@ def train(
     rng = np.random.default_rng(seed)
     torch.manual_seed(seed)
     data = generate_forward_dynamics_dataset(robot, n_samples, rng)
-    train_data, val_data = train_val_split(data, val_fraction, rng)
+    train_data, test_data, eval_data = split_dataset(data, split, rng)
 
     M, C, g = precompute_dynamics_operators(robot, train_data["q"], train_data["qdot"])
     q_t = torch.tensor(train_data["q"], dtype=torch.float64)
@@ -144,14 +154,17 @@ def train(
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     history, val_history = [], []
 
-    q_v = torch.tensor(val_data["q"], dtype=torch.float64)
-    qdot_v = torch.tensor(val_data["qdot"], dtype=torch.float64)
-    tau_v = torch.tensor(val_data["tau"], dtype=torch.float64)
-    qddot_v = torch.tensor(val_data["qddot"], dtype=torch.float64)
+    def _tensors(d):
+        return tuple(torch.tensor(d[k], dtype=torch.float64)
+                     for k in ("q", "qdot", "tau", "qddot"))
+
+    q_te, qdot_te, tau_te, qddot_te = _tensors(test_data)
+    q_e, qdot_e, tau_e, qddot_e = _tensors(eval_data)
 
     if verbose:
         print(f"   Training forward-dynamics PINN on {robot.name} "
-              f"({len(train_data['q'])} train / {len(val_data['q'])} val samples)...")
+              f"({len(train_data['q'])} train / {len(test_data['q'])} test / "
+              f"{len(eval_data['q'])} eval samples)...")
     start = time.time()
     for it in range(iterations):
         optimizer.zero_grad()
@@ -169,7 +182,7 @@ def train(
         # model generalizes and separate once it starts memorizing.
         if val_every and (it % val_every == 0 or it == iterations - 1):
             with torch.no_grad():
-                val_mse = (model(q_v, qdot_v, tau_v) - qddot_v).pow(2).mean().item()
+                val_mse = (model(q_te, qdot_te, tau_te) - qddot_te).pow(2).mean().item()
             val_history.append({"iter": it, "val_mse": val_mse, "val_rmse": val_mse ** 0.5})
 
         if verbose and (it % log_every == 0 or it == iterations - 1):
@@ -178,10 +191,12 @@ def train(
     elapsed = time.time() - start
 
     with torch.no_grad():
-        val_rmse = (model(q_v, qdot_v, tau_v) - qddot_v).pow(2).mean().sqrt().item()
+        test_rmse = (model(q_te, qdot_te, tau_te) - qddot_te).pow(2).mean().sqrt().item()
+        eval_rmse = (model(q_e, qdot_e, tau_e) - qddot_e).pow(2).mean().sqrt().item()
 
     if verbose:
-        print(f"   ✅ Trained in {elapsed:.1f}s — held-out q̈ RMSE = {val_rmse:.4f} rad/s²")
+        print(f"   ✅ Trained in {elapsed:.1f}s — eval q̈ RMSE = {eval_rmse:.4f} rad/s² "
+              f"(test {test_rmse:.4f}, never-seen eval split is the number to quote)")
         if val_history:
             best = min(val_history, key=lambda h: h["val_rmse"])
             if best["iter"] < 0.8 * (iterations - 1):
@@ -190,4 +205,5 @@ def train(
                       f"made it worse. Train on more samples rather than for longer.")
 
     return ForwardDynamicsResult(model=model, loss_history=history,
-                                 val_history=val_history, val_data_rmse=val_rmse)
+                                 val_history=val_history,
+                                 test_rmse=test_rmse, eval_rmse=eval_rmse)
