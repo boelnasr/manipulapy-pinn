@@ -98,22 +98,58 @@ Open <https://github.com/jslee02/awesome-robotics-libraries/issues/new?template=
 
 ### If a maintainer asks for the YAML
 
-Add to `data/dynamics-simulation.yaml`, alphabetically between `LibrePilot`
-and `MARS`. Do not add a `_meta:` block — CI generates it. Sign the commit
-(`git commit --signoff`); their DCO check requires it.
+Add to `data/dynamics-simulation.yaml`, alphabetically between the
+`LibrePilot` and `MARS` blocks (currently the `- name: MARS` line). Do not add
+a `_meta:` block — CI generates `stars`, `last_commit` and `language`. Sign the
+commit (`git commit --signoff`); their DCO check requires it.
 
 ```yaml
 - name: ManipulaPy
   url: https://manipulapy.readthedocs.io/
-  github: boelnasr/ManipulaPy
   description: Serial manipulator kinematics, dynamics, planning, and control in Python with interchangeable NumPy, CuPy, PyTorch, and JAX backends.
+  github: boelnasr/ManipulaPy
+  license: AGPL-3.0-or-later
+  languages:
+  - Python
+  models:
+  - rigid
 ```
+
+Field order and vocabulary follow the neighbouring entries: `models: rigid` is
+the value used by the 25 other rigid-body entries in that file, and `languages`
+uses bare `Python`.
 
 Rendered, that becomes:
 
 ```
 * 🟢 [ManipulaPy](https://manipulapy.readthedocs.io/) - Serial manipulator kinematics, dynamics, planning, and control in Python with interchangeable NumPy, CuPy, PyTorch, and JAX backends. [⭐ 23](https://github.com/boelnasr/ManipulaPy)
 ```
+
+## Why Dynamics Simulation and not another section
+
+Section names in that list are loose; what matters is what each one actually
+contains.
+
+- **Dynamics Simulation** — despite the name, this is the rigid-body
+  kinematics-and-dynamics library bucket: pinocchio, KDL, RBDL, RBDyn, kindr,
+  idyntree, PyDy, Klampt, Robopy. ManipulaPy is the same kind of object as
+  those. **This is the fit.**
+- **Inverse Kinematics** — a real secondary fit (ManipulaPy ships DLS, SQP and
+  TRAC-IK solvers), and the section is thin: six entries, the smallest at 8
+  stars. The issue form takes one category, so lead with Dynamics Simulation
+  and offer this as a cross-listing in the "why" field. There is precedent —
+  Bullet is listed under Dynamics Simulation and PyBullet under Simulators.
+- **Motion Planning and Control** — poor fit. It is planners and optimal
+  control (OMPL, MoveIt!, Crocoddyl, TOPP-RA, Ruckig). ManipulaPy's
+  quintic/cubic time-scaling and PID/computed-torque controllers are features
+  of a manipulator library, not the thing itself.
+- **Robot Modeling** — no. That section is URDF/SDF formats plus model-authoring
+  utilities (onshape-to-robot, phobos). The bundled URDF parser is not the
+  library's identity.
+- **Math** — no. Spatial algebra and Lie group libraries only (manif, Sophus,
+  spatialmath-python).
+- **Vision** — no. The optional stereo/YOLO module is not strong enough to
+  stand as its own entry, and a thin second listing weakens the first.
 
 ## Secondary: kiloreux/awesome-robotics
 
